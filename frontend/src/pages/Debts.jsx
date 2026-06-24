@@ -29,9 +29,9 @@ export default function Debts() {
   return (
     <>
       <div className="grid">
-        <Stat label="Кредиторская (мы должны)" value={money(s.payable)} tone="neg" sub="Открытые, в сомах" />
-        <Stat label="Дебиторская (нам должны)" value={money(s.receivable)} tone="pos" sub="Открытые, в сомах" />
-        <Stat label="Сальдо" value={money(s.net)} tone={signClass(s.net)} />
+        <Stat label="Дебиторская (нам должны)" value={money(s.receivable)} tone="pos" sub={`Business ${money(s.business_receivable)} · Express ${money(s.express_receivable)}`} />
+        <Stat label="Кредиторская (мы должны)" value={money(s.payable)} tone="neg" sub={`Business ${money(s.business_payable)} · Express ${money(s.express_payable)}`} />
+        <Stat label="Сальдо (нам − мы)" value={money(s.net)} tone={signClass(s.net)} sub="дебиторка − кредиторка" />
       </div>
 
       <div className="card">

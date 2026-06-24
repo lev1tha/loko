@@ -60,7 +60,12 @@ export default function Expenses() {
   const accounts = useFetch('/accounts/', { page_size: PAGE_SIZE })
   const rows = asList(expenses.data)
   const total = expenses.data?.count ?? rows.length
-  const totalSum = rows.reduce((acc, e) => acc + Number(e.amount || 0), 0)
+  // Итоги в сомах. Делим расходы на влияющие на прибыль (себест. + опер. + прочие)
+  // и движения денег (аванс поставщику, изъятие, инвест/финанс) — они не расход прибыли.
+  const totalKgs = rows.reduce((acc, e) => acc + Number(e.amount_kgs || 0), 0)
+  const PROFIT_CATS = new Set(['COGS', 'OPEX', 'OTHER'])
+  const profitExp = rows.filter((e) => PROFIT_CATS.has(e.category)).reduce((acc, e) => acc + Number(e.amount_kgs || 0), 0)
+  const otherExp = totalKgs - profitExp
 
   async function remove(e) {
     if (!window.confirm(`Удалить расход «${e.category_display}» на ${money(e.amount)}?`)) return
@@ -108,7 +113,7 @@ export default function Expenses() {
 
         {!expenses.loading && rows.length > 0 && (
           <div className="caption" style={{ marginBottom: 8 }}>
-            Показано {rows.length} из {total} · сумма начисления {money(totalSum)}
+            Показано {rows.length} из {total} · всего {money(totalKgs)} · влияют на прибыль: {money(profitExp)} · авансы/изъятия: {money(otherExp)}
           </div>
         )}
 
@@ -138,9 +143,18 @@ export default function Expenses() {
                     <td><Badge>{e.category_display}</Badge></td>
                     <td className="muted">{e.opex_article_display || '—'}</td>
                     <td>{e.account_name}</td>
-                    <td className="num neg">−{money(e.amount)}</td>
-                    <td className="num">{money(e.paid_amount)}</td>
-                    <td className={`num ${signClass(e.payable)}`}>{money(e.payable)}</td>
+                    <td className="num neg">
+                      −{money(e.amount, e.account_currency)}
+                      {e.account_currency === 'CNY' && <div className="caption muted">≈ {money(e.amount_kgs)}</div>}
+                    </td>
+                    <td className="num">
+                      {money(e.paid_amount, e.account_currency)}
+                      {e.account_currency === 'CNY' && <div className="caption muted">≈ {money(e.paid_amount_kgs)}</div>}
+                    </td>
+                    <td className={`num ${signClass(e.payable)}`}>
+                      {money(e.payable, e.account_currency)}
+                      {e.account_currency === 'CNY' && Number(e.payable) !== 0 && <div className="caption muted">≈ {money(e.payable_kgs)}</div>}
+                    </td>
                     <td className="num">
                       <div className="row gap-sm" style={{ justifyContent: 'flex-end' }}>
                         <button className="btn btn-icon btn-ghost btn-sm" title="Изменить" onClick={() => setForm(e)}>

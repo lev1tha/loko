@@ -159,22 +159,17 @@ class Command(BaseCommand):
             if r[C_DATE_OP] is not None and not isinstance(r[C_DATE_OP], (datetime, date)):
                 stats["bad_date"] += 1
             pay_date = parse_date(r[C_DATE_PAY], fallback=op_date)
+            # Известная ошибка ввода: часть июньских операций записана февралём.
+            # Журнал ведётся за июнь 2026 — возвращаем такие даты в июнь.
+            if op_date and op_date.year == 2026 and op_date.month == 2:
+                op_date = op_date.replace(month=6)
+            if pay_date and pay_date.year == 2026 and pay_date.month == 2:
+                pay_date = pay_date.replace(month=6)
 
             acc = method_account(r[C_METHOD], accounts)
             note = " · сумма уточняется" if uncertain else ""
 
-            if op_type == "Расход":
-                kind = str(r[C_KIND] or "")
-                is_cogs = any(h in kind.lower() for h in COGS_HINTS)
-                expenses.append(Expense(
-                    account=acc,
-                    category=ExpenseCategory.COGS if is_cogs else ExpenseCategory.OPEX,
-                    opex_article=None if is_cogs else OpexArticle.OTHER,
-                    amount=amount, paid_amount=amount, description=((kind or "Расход") + note)[:500],
-                    date=op_date, payment_date=pay_date,
-                ))
-                stats["expense"] += 1
-            else:
+            if op_type in INCOME_TYPES:
                 paid = Decimal("0") if op_type == "Не заплатил" else amount
                 if op_type == "Не заплатил":
                     stats["unpaid"] += 1
@@ -185,6 +180,19 @@ class Command(BaseCommand):
                     date=op_date, payment_date=pay_date, **snap,
                 ))
                 stats["income"] += 1
+            else:
+                # «Расход» ИЛИ строка без явного типа дохода, но с видом операции
+                # (командировочные, зарплата и т.п.) — это расход, не продажа.
+                kind = str(r[C_KIND] or "")
+                is_cogs = any(h in kind.lower() for h in COGS_HINTS)
+                expenses.append(Expense(
+                    account=acc,
+                    category=ExpenseCategory.COGS if is_cogs else ExpenseCategory.OPEX,
+                    opex_article=None if is_cogs else OpexArticle.OTHER,
+                    amount=amount, paid_amount=amount, description=((kind or "Расход") + note)[:500],
+                    date=op_date, payment_date=pay_date,
+                ))
+                stats["expense"] += 1
 
         Sale.objects.bulk_create(sales, batch_size=500)
         Expense.objects.bulk_create(expenses, batch_size=500)

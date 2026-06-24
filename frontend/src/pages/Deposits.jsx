@@ -22,6 +22,10 @@ export default function Deposits() {
   const deposits = useFetch('/deposits/', { from, to, status: status || undefined, page_size: 10000 })
   const businessAccounts = useFetch('/accounts/', { module: 'BUSINESS' })
   const rows = asList(deposits.data)
+  // Итоги (в сомах): признано как выручка vs в ожидании (авансы / погашение ДЗ).
+  const sumByStatus = (st) => rows.filter((d) => d.status === st).reduce((a, d) => a + Number(d.amount_kgs || 0), 0)
+  const recognizedTotal = sumByStatus('RECOGNIZED')
+  const heldTotal = sumByStatus('HELD')
 
   async function act(id, action) {
     setBusyId(id)
@@ -69,6 +73,12 @@ export default function Deposits() {
             <IconPlus size={18} /> Новый депозит
           </button>
         </div>
+
+        {!deposits.loading && rows.length > 0 && (
+          <div className="caption" style={{ marginBottom: 8 }}>
+            Признано как выручка: {money(recognizedTotal)} · В ожидании (авансы / ДЗ): {money(heldTotal)} · Всего: {money(recognizedTotal + heldTotal)}
+          </div>
+        )}
 
         {deposits.loading ? (
           <Spinner />

@@ -1,8 +1,11 @@
 from decimal import Decimal
 
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
-from .models import Account, AppSettings, Expense, ExpenseCategory, OpexArticle, Transfer
+from .models import Account, AppSettings, Currency, Expense, ExpenseCategory, OpexArticle, Transfer
+
+_KGS_FIELD = serializers.DecimalField(max_digits=16, decimal_places=2)
 
 
 class AppSettingsSerializer(serializers.ModelSerializer):
@@ -52,7 +55,35 @@ class ExpenseSerializer(serializers.ModelSerializer):
         source="get_opex_article_display", read_only=True, default=None
     )
     account_name = serializers.CharField(source="account.name", read_only=True)
+    account_currency = serializers.CharField(source="account.currency", read_only=True)
     payable = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    # Суммы, приведённые к сому (для мультивалютных счетов Business: юань × курс).
+    amount_kgs = serializers.SerializerMethodField()
+    paid_amount_kgs = serializers.SerializerMethodField()
+    payable_kgs = serializers.SerializerMethodField()
+
+    _ZERO = Decimal("0.01")
+
+    def _to_kgs(self, amount, currency):
+        if amount is None:
+            return Decimal("0.00")
+        if currency == Currency.CNY:
+            if not hasattr(self, "_rate"):
+                self._rate = AppSettings.load().cny_to_kgs_rate
+            return (amount * self._rate).quantize(self._ZERO)
+        return amount
+
+    @extend_schema_field(_KGS_FIELD)
+    def get_amount_kgs(self, obj):
+        return self._to_kgs(obj.amount, obj.account.currency)
+
+    @extend_schema_field(_KGS_FIELD)
+    def get_paid_amount_kgs(self, obj):
+        return self._to_kgs(obj.paid_amount, obj.account.currency)
+
+    @extend_schema_field(_KGS_FIELD)
+    def get_payable_kgs(self, obj):
+        return self._to_kgs(obj.payable, obj.account.currency)
 
     class Meta:
         model = Expense
@@ -60,13 +91,17 @@ class ExpenseSerializer(serializers.ModelSerializer):
             "id",
             "account",
             "account_name",
+            "account_currency",
             "category",
             "category_display",
             "opex_article",
             "opex_article_display",
-            "amount",          # начисление
-            "paid_amount",     # оплата
-            "payable",         # кредиторка
+            "amount",          # начисление (в валюте счёта)
+            "paid_amount",     # оплата (в валюте счёта)
+            "payable",         # кредиторка (в валюте счёта)
+            "amount_kgs",      # начисление в сомах (юань × курс)
+            "paid_amount_kgs", # оплата в сомах
+            "payable_kgs",     # кредиторка в сомах
             "description",
             "date",            # дата операции (ОПиУ)
             "payment_date",    # дата оплаты (ОДДС)

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import api, { errorMessage } from '../api/client'
 import { useFetch, asList } from '../lib/hooks'
 import { firstOfMonth, today, money, dateRu } from '../lib/format'
-import { Alert, Badge, EmptyState, Field, Modal, Spinner, Stat } from '../components/ui'
+import { Alert, Badge, EmptyState, Field, Modal, Spinner } from '../components/ui'
 import { IconPlus, IconTransfer } from '../components/icons'
 
 // module: 'BUSINESS' | undefined (all)
@@ -60,7 +60,7 @@ export default function Transfers({ module }) {
                     <td className="num">{money(t.amount, t.from_currency)}</td>
                     <td className="muted"><IconTransfer size={16} /></td>
                     <td>
-                      {t.to_account_name}{' '}
+                      <strong>{t.to_account_name}</strong>{' '}
                       {t.is_conversion && <Badge variant="badge-admin">обмен</Badge>}
                     </td>
                     <td className="num">{money(t.to_amount, t.to_currency)}</td>
@@ -185,10 +185,25 @@ function TransferForm({ accounts, onClose, onSaved }) {
           )}
         </div>
 
-        {isConversion && (
-          <div className="card card-soft" style={{ padding: 16 }}>
-            <div className="caption" style={{ marginBottom: 8 }}>Зачисление на {toAcc?.name}</div>
-            <Stat label={`Будет зачислено, ${toAcc?.currency}`} value={money(toAmount, toAcc?.currency)} />
+        {toAcc && (Number(amount) > 0 || Number(toAmount) > 0) && (
+          <div className="card card-soft sale-preview">
+            <div className="caption">Поступит на счёт{isConversion ? ' · обмен валюты' : ''}</div>
+            <div className="preview-grid">
+              <div className="preview-cell">
+                <span className="preview-label">Счёт получателя</span>
+                <span className="preview-value">{toAcc.name}</span>
+              </div>
+              <div className="preview-cell">
+                <span className="preview-label">Будет зачислено</span>
+                <span className="preview-value">{money(toAmount || amount, toAcc.currency)}</span>
+              </div>
+              {isConversion && (
+                <div className="preview-cell">
+                  <span className="preview-label">Курс</span>
+                  <span className="preview-value">{rate || '—'} сом/¥</span>
+                </div>
+              )}
+            </div>
           </div>
         )}
 

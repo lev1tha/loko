@@ -177,6 +177,9 @@ function Pnl({ data, onDrill }) {
       <div className="card-header">
         <span className="card-title">Отчёт о прибылях и убытках (ООПИУ)</span>
       </div>
+      <p className="caption" style={{ margin: '0 0 12px', lineHeight: 1.5 }}>
+        Сколько заработали и потратили за период (по дате операции). Прибыль = выручка − себестоимость − расходы. Авансы, переводы и конвертации сюда не входят.
+      </p>
       <div className="table-wrap">
         <table className="table" style={{ minWidth: 0 }}>
           <tbody>
@@ -224,6 +227,9 @@ function CashFlow({ data, onDrill }) {
       <div className="card-header">
         <span className="card-title">Отчёт о движении денежных средств (ОДДС)</span>
       </div>
+      <p className="caption" style={{ margin: '0 0 12px', lineHeight: 1.5 }}>
+        Сколько денег реально пришло и ушло (по дате оплаты). Показывает остаток на начало и конец периода.
+      </p>
       <div className="table-wrap">
         <table className="table" style={{ minWidth: 0 }}>
           <tbody>

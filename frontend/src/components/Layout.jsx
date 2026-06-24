@@ -19,7 +19,10 @@ import './Layout.css'
 // Navigation grouped by module. Each group renders under a section label.
 const GROUPS = [
   {
-    items: [{ to: '/', label: 'Дашборд', icon: IconDashboard, end: true }],
+    items: [
+      { to: '/', label: 'Дашборд', icon: IconDashboard, end: true },
+      { to: '/control', label: 'Контроль / сверка', icon: IconReports },
+    ],
   },
   {
     title: 'Loko Express',
@@ -57,6 +60,7 @@ const ADMIN_GROUP = {
 
 const TITLES = {
   '/': ['Дашборд', 'Сводка по Loko (Express + Business)'],
+  '/control': ['Контроль / сверка', 'Как складываются итоги — сверка с тетрадью'],
   '/sales': ['Продажи', 'Loko Express · учёт карго и расчёт маржи'],
   '/express/accounts': ['Счета Express', 'Остатки касс и банков (сом)'],
   '/business/accounts': ['Счета Business', 'Мультивалютные счета · сом / юань'],

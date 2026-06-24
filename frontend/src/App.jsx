@@ -4,6 +4,7 @@ import ProtectedRoute from './components/ProtectedRoute'
 import Layout from './components/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
+import Control from './pages/Control'
 import Sales from './pages/Sales'
 import Expenses from './pages/Expenses'
 import Accounts from './pages/Accounts'
@@ -30,6 +31,7 @@ export default function App() {
             }
           >
             <Route index element={<Dashboard />} />
+            <Route path="control" element={<Control />} />
 
             {/* Loko Express */}
             <Route path="sales" element={<Sales />} />
