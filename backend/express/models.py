@@ -77,6 +77,9 @@ class Sale(models.Model):
     margin_som = models.DecimalField(
         max_digits=14, decimal_places=2, default=Decimal("0"), verbose_name="Маржа (сом)"
     )
+    cost_is_manual = models.BooleanField(
+        default=False, verbose_name="Себестоимость введена вручную"
+    )
 
     date = models.DateField(verbose_name="Дата операции")
     payment_date = models.DateField(null=True, blank=True, verbose_name="Дата оплаты")
@@ -119,12 +122,16 @@ class Sale(models.Model):
         weight = Decimal(self.weight_kg) if self.weight_kg not in (None, "") else Decimal("0")
 
         if self.amount_mode == self.AmountMode.WEIGHT:
-            # Price computed from weight; price_som is derived.
+            # Price from weight (0 if weight omitted — вес необязателен).
             self.price_som = _money(weight * self.price_per_kg_usd * self.usd_rate_som)
-            self.cost_som = _money(weight * self.cost_per_kg_som)
         else:
-            # DIRECT: price_som comes from input; cost from weight if provided.
+            # DIRECT: price_som comes from input.
             self.price_som = _money(Decimal(self.price_som or 0))
+
+        # Cost: manual override (вписанная себестоимость) or dynamic from weight.
+        if self.cost_is_manual:
+            self.cost_som = _money(Decimal(self.cost_som or 0))
+        else:
             self.cost_som = _money(weight * self.cost_per_kg_som)
 
         self.margin_som = self.price_som - self.cost_som

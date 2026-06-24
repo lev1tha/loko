@@ -195,7 +195,7 @@ function Pnl({ data, onDrill }) {
             <Line label="Прочие расходы" value={d.other_expenses} sign="minus" indent lineKey="other" onDrill={onDrill} />
             <Line label="Финансовые расходы" value={d.financial_expenses} sign="minus" indent />
             <Line label="Прибыль до налогообложения" value={d.pre_tax_profit} strong level />
-            <Line label="Налог на прибыль" sub={`${Number(d.tax_rate || 0)}%`} value={d.tax} sign="minus" indent />
+            <Line label="Налоги (нал/безнал)" sub={`нал ${Number(d.cash_tax_rate || 0)}% · безнал ${Number(d.noncash_tax_rate || 0)}% → эфф. ${Number(d.tax_rate || 0)}%`} value={d.tax} sign="minus" indent />
             <Line label="Чистая прибыль" value={d.net_profit} strong level />
             <Line label="Чистая рентабельность, %" value={null} sub={`${Number(d.net_margin_pct || 0)} %`} indent />
           </tbody>
@@ -237,8 +237,11 @@ function CashFlow({ data, onDrill }) {
             <Line label="Поставщики / авансы" value={d.supplier_payments} sign="minus" indent lineKey="supplier" onDrill={onDrill} />
             <Line label="Прочее (неоперац.)" value={d.other_outflow} sign="minus" indent lineKey="other" onDrill={onDrill} />
             <Line label="Чистый операционный ДДС" value={d.net_operating} strong level />
-            <Line label="Финансовая деятельность" value={d.financing_outflow} sign="minus" />
+            <Line label="Инвестиционная деятельность" value={d.net_investing} strong level />
+            <Line label="Покупка оборудования/активов" value={d.investing_outflow} sign="minus" indent lineKey="invest" onDrill={onDrill} />
+            <Line label="Финансовая деятельность" value={d.net_financing} strong level />
             <Line label="Изъятие собственника" value={d.owner_withdrawals} sign="minus" indent lineKey="owner" onDrill={onDrill} />
+            <Line label="Кредиты / проценты" value={d.financing_other} sign="minus" indent lineKey="financing" onDrill={onDrill} />
             <Line label="Чистое изменение денег" value={d.net_cash_flow} strong level />
             <Line label="Остаток денег на конец" value={d.closing_balance} strong level />
           </tbody>

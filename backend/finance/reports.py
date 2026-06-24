@@ -102,10 +102,12 @@ def _expense_paid(date_from, date_to, kinds, category=None, module=None):
 # ---------------------------------------------------------------------------
 # Deposits (Business)
 # ---------------------------------------------------------------------------
-def _recognized_deposits(date_from, date_to, module=None):
+def _recognized_deposits(date_from, date_to, kinds, module=None):
     from business.models import Deposit
 
-    qs = _by_module(Deposit.objects.filter(status=Deposit.Status.RECOGNIZED), module)
+    qs = _by_module(
+        Deposit.objects.filter(status=Deposit.Status.RECOGNIZED, account__kind__in=kinds), module
+    )
     qs = _between(qs, date_from, date_to, "recognized_date")
     total = ZERO
     for row in qs.values("currency").annotate(s=Sum("amount")):
@@ -113,10 +115,10 @@ def _recognized_deposits(date_from, date_to, module=None):
     return total, qs.count()
 
 
-def _deposits_received(date_from, date_to, module=None):
+def _deposits_received(date_from, date_to, kinds, module=None):
     from business.models import Deposit
 
-    qs = _by_module(Deposit.objects.all(), module)
+    qs = _by_module(Deposit.objects.filter(account__kind__in=kinds), module)
     qs = _between(qs, date_from, date_to, "date")
     total = ZERO
     for row in qs.values("currency").annotate(s=Sum("amount")):
@@ -139,15 +141,12 @@ def _opex_breakdown(date_from, date_to, kinds, module=None):
 # ===========================================================================
 # ОПиУ (P&L) — по начислению
 # ===========================================================================
-def build_pnl(date_from=None, date_to=None, payment="all", tax_rate=None, module=None):
+def _pnl_base(date_from, date_to, payment, module):
+    """Компоненты ОПиУ до строки налога (для заданного канала оплаты)."""
     kinds = _kinds_for_payment(payment)
-    if tax_rate is None:
-        tax_rate = AppSettings.load().profit_tax_rate
-    tax_rate = Decimal(str(tax_rate))
-
     sales = _sales(date_from, date_to, kinds, "date", module)
     express_revenue = sales.aggregate(s=Sum("price_som"))["s"] or ZERO
-    deposit_revenue, deposit_count = _recognized_deposits(date_from, date_to, module)
+    deposit_revenue, deposit_count = _recognized_deposits(date_from, date_to, kinds, module)
     revenue = express_revenue + deposit_revenue
 
     # Себестоимость = динамическая по продажам Express + закуп товара (Business).
@@ -163,37 +162,74 @@ def build_pnl(date_from=None, date_to=None, payment="all", tax_rate=None, module
     other_income = ZERO          # задел: прочие доходы
     financial_expenses = ZERO    # задел: финансовые расходы
     pre_tax_profit = operating_profit + other_income - other_expenses - financial_expenses
+    return {
+        "sales": sales, "express_revenue": express_revenue, "deposit_revenue": deposit_revenue,
+        "deposit_count": deposit_count, "revenue": revenue, "cogs": cogs, "gross_profit": gross_profit,
+        "opex": opex, "operating_profit": operating_profit, "other_expenses": other_expenses,
+        "other_count": other_count, "other_income": other_income, "financial_expenses": financial_expenses,
+        "pre_tax_profit": pre_tax_profit,
+    }
 
-    tax = (max(pre_tax_profit, ZERO) * tax_rate / Decimal("100")).quantize(ZERO)
-    net_profit = pre_tax_profit - tax
 
-    expense_total_count = opex["count"] + other_count
+def build_pnl(date_from=None, date_to=None, payment="all", tax_rate=None, module=None):
+    """ОПиУ. Налог на «прибыль до налогов» по ставке канала оплаты:
+    наличные cash_tax_rate (6%), безнал noncash_tax_rate (4%) — оба редактируемы.
+    Для payment='all' каждый канал облагается своей ставкой и суммируется.
+    ?tax_rate= — ручной плоский override (для сценария «что если»).
+    """
+    cfg = AppSettings.load()
+    cash_rate = cfg.cash_tax_rate
+    noncash_rate = cfg.noncash_tax_rate
 
+    base = _pnl_base(date_from, date_to, payment, module)
+    pre = base["pre_tax_profit"]
+
+    if tax_rate is not None and str(tax_rate) != "":
+        rate = Decimal(str(tax_rate))
+        tax = (max(pre, ZERO) * rate / Decimal("100")).quantize(ZERO)
+        eff_rate = rate
+    elif payment == "cash":
+        tax = (max(pre, ZERO) * cash_rate / Decimal("100")).quantize(ZERO)
+        eff_rate = cash_rate
+    elif payment == "noncash":
+        tax = (max(pre, ZERO) * noncash_rate / Decimal("100")).quantize(ZERO)
+        eff_rate = noncash_rate
+    else:  # all → каждый канал по своей ставке, затем сумма
+        pre_cash = _pnl_base(date_from, date_to, "cash", module)["pre_tax_profit"]
+        pre_noncash = _pnl_base(date_from, date_to, "noncash", module)["pre_tax_profit"]
+        tax = ((max(pre_cash, ZERO) * cash_rate + max(pre_noncash, ZERO) * noncash_rate)
+               / Decimal("100")).quantize(ZERO)
+        eff_rate = _pct(tax, max(pre, ZERO)) if pre > ZERO else ZERO
+
+    net_profit = pre - tax
+    opex, sales, revenue = base["opex"], base["sales"], base["revenue"]
     return {
         "report": "PNL",
         "period": {"from": date_from, "to": date_to},
         "payment": payment,
-        "express_revenue": express_revenue,
-        "deposit_revenue": deposit_revenue,
+        "express_revenue": base["express_revenue"],
+        "deposit_revenue": base["deposit_revenue"],
         "revenue": revenue,
-        "cogs": cogs,
-        "gross_profit": gross_profit,
-        "gross_margin_pct": _pct(gross_profit, revenue),
+        "cogs": base["cogs"],
+        "gross_profit": base["gross_profit"],
+        "gross_margin_pct": _pct(base["gross_profit"], revenue),
         "opex_articles": opex["articles"],
         "operating_expenses": opex["total"],
-        "operating_profit": operating_profit,
-        "other_income": other_income,
-        "other_expenses": other_expenses,
-        "financial_expenses": financial_expenses,
-        "pre_tax_profit": pre_tax_profit,
-        "tax_rate": tax_rate,
+        "operating_profit": base["operating_profit"],
+        "other_income": base["other_income"],
+        "other_expenses": base["other_expenses"],
+        "financial_expenses": base["financial_expenses"],
+        "pre_tax_profit": pre,
+        "tax_rate": eff_rate,
+        "cash_tax_rate": cash_rate,
+        "noncash_tax_rate": noncash_rate,
         "tax": tax,
         "net_profit": net_profit,
         "net_margin_pct": _pct(net_profit, revenue),
         "sales_count": sales.count(),
-        "deposit_count": deposit_count,
+        "deposit_count": base["deposit_count"],
         "opex_count": opex["count"],
-        "operations": {"income": sales.count() + deposit_count, "expense": expense_total_count},
+        "operations": {"income": sales.count() + base["deposit_count"], "expense": opex["count"] + base["other_count"]},
     }
 
 
@@ -234,7 +270,7 @@ def build_cashflow(date_from=None, date_to=None, payment="all", module=None):
 
     sales = _sales(date_from, date_to, kinds, "payment_date", module)
     express_inflow = sales.aggregate(s=Sum("paid_som"))["s"] or ZERO
-    deposits_inflow, deposits_count = _deposits_received(date_from, date_to, module)
+    deposits_inflow, deposits_count = _deposits_received(date_from, date_to, kinds, module)
     operating_inflow = express_inflow + deposits_inflow
 
     opex, opex_cnt = _expense_paid(date_from, date_to, kinds, ExpenseCategory.OPEX, module)
@@ -242,17 +278,25 @@ def build_cashflow(date_from=None, date_to=None, payment="all", module=None):
     supplier, sup_cnt = _expense_paid(date_from, date_to, kinds, ExpenseCategory.SUPPLIER, module)
     other, other_cnt = _expense_paid(date_from, date_to, kinds, ExpenseCategory.OTHER, module)
     owner, owner_cnt = _expense_paid(date_from, date_to, kinds, ExpenseCategory.OWNER, module)
+    invest, inv_cnt = _expense_paid(date_from, date_to, kinds, ExpenseCategory.INVEST, module)
+    financing_exp, fin_cnt = _expense_paid(date_from, date_to, kinds, ExpenseCategory.FINANCING, module)
 
+    # Операционная деятельность
     operating_outflow = opex + cogs_paid + supplier + other
     net_operating = operating_inflow - operating_outflow
-    financing_outflow = owner  # изъятие собственника
-    total_outflow = operating_outflow + financing_outflow
-    net_cash_flow = operating_inflow - total_outflow
+    # Инвестиционная деятельность (отток на оборудование/активы)
+    investing_outflow = invest
+    net_investing = -investing_outflow
+    # Финансовая деятельность (изъятие собственника + кредиты/проценты)
+    financing_outflow = owner + financing_exp
+    net_financing = -financing_outflow
+    total_outflow = operating_outflow + investing_outflow + financing_outflow
+    net_cash_flow = net_operating + net_investing + net_financing
 
     opening = _consolidated_cash(date_from, inclusive=False, module=module)
     closing = _consolidated_cash(date_to, inclusive=True, module=module)
 
-    expense_count = opex_cnt + sup_cnt + other_cnt + owner_cnt
+    expense_count = opex_cnt + cogs_cnt + sup_cnt + other_cnt + owner_cnt + inv_cnt + fin_cnt
 
     return {
         "report": "CASHFLOW",
@@ -268,8 +312,12 @@ def build_cashflow(date_from=None, date_to=None, payment="all", module=None):
         "other_outflow": other,
         "operating_outflow": operating_outflow,
         "net_operating": net_operating,
+        "investing_outflow": investing_outflow,
+        "net_investing": net_investing,
         "owner_withdrawals": owner,
+        "financing_other": financing_exp,
         "financing_outflow": financing_outflow,
+        "net_financing": net_financing,
         "total_outflow": total_outflow,
         "net_cash_flow": net_cash_flow,
         "closing_balance": closing,
@@ -486,6 +534,8 @@ BREAKDOWN_LABELS = {
     "other": "Прочие / неоперационные расходы",
     "supplier": "Оплата / аванс поставщикам",
     "owner": "Изъятие собственника",
+    "invest": "Инвестиции (оборудование/активы)",
+    "financing": "Финансовые (кредиты/проценты)",
     "inflow": "Приток денежных средств",
     "outflow": "Отток денежных средств",
 }
@@ -563,6 +613,10 @@ def breakdown(line, date_from=None, date_to=None, payment="all", module=None, ba
         expense_items(category=ExpenseCategory.SUPPLIER)
     if line in ("owner", "outflow"):
         expense_items(category=ExpenseCategory.OWNER)
+    if line in ("invest", "outflow"):
+        expense_items(category=ExpenseCategory.INVEST)
+    if line in ("financing", "outflow"):
+        expense_items(category=ExpenseCategory.FINANCING)
     if line == "outflow":
         expense_items(category=ExpenseCategory.OPEX)
         expense_items(category=ExpenseCategory.COGS)

@@ -50,12 +50,21 @@ class AppSettings(models.Model):
         default=Decimal("12.5"),
         verbose_name="Курс юаня для отображения (1 CNY = X сом)",
     )
-    # Profit tax rate (%) used in the ООПИУ net-profit line.
+    # Profit tax rate (%) — legacy single rate; kept for back-compat / overrides.
     profit_tax_rate = models.DecimalField(
         max_digits=5,
         decimal_places=2,
         default=Decimal("10"),
         verbose_name="Ставка налога на прибыль (%)",
+    )
+    # Налог на прибыль до налогов по каналу оплаты (редактируемый).
+    cash_tax_rate = models.DecimalField(
+        max_digits=5, decimal_places=2, default=Decimal("6"),
+        verbose_name="Налог — наличные (%)",
+    )
+    noncash_tax_rate = models.DecimalField(
+        max_digits=5, decimal_places=2, default=Decimal("4"),
+        verbose_name="Налог — безналичные (%)",
     )
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -201,6 +210,8 @@ class ExpenseCategory(models.TextChoices):
     SUPPLIER = "SUPPLIER", "Оплата / аванс поставщику"
     OTHER = "OTHER", "Неоперационная деятельность (Другое)"
     OWNER = "OWNER", "Изъятие собственника"
+    INVEST = "INVEST", "Инвестиционная (оборудование/активы)"
+    FINANCING = "FINANCING", "Финансовая (кредиты/проценты)"
 
 
 class Expense(models.Model):

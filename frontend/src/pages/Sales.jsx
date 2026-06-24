@@ -166,6 +166,7 @@ function SaleForm({ editing, accounts, onClose, onSaved }) {
   const [paid, setPaid] = useState(isEdit ? editing.paid_som : '')
   // Дата оплаты по умолчанию — сегодня (для новой); при редактировании — как в записи.
   const [paymentDate, setPaymentDate] = useState(editing?.payment_date || today())
+  const [manualCost, setManualCost] = useState(isEdit && editing.cost_is_manual ? String(editing.cost_som) : '')
   const [quote, setQuote] = useState(null)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
@@ -191,6 +192,9 @@ function SaleForm({ editing, accounts, onClose, onSaved }) {
   const accrual = mode === 'WEIGHT' ? Number(quote?.price_som || 0) : Number(directAmount || 0)
   const paidValue = paid === '' ? accrual : Number(paid)
   const receivable = accrual - paidValue
+  const autoCost = mode === 'WEIGHT' ? Number(quote?.cost_som || 0) : 0
+  const costValue = manualCost !== '' ? Number(manualCost) : autoCost
+  const margin = accrual - costValue
 
   async function submit(e) {
     e.preventDefault()
@@ -205,9 +209,15 @@ function SaleForm({ editing, accounts, onClose, onSaved }) {
         date,
         payment_date: paymentDate || date,
       }
-      if (mode === 'WEIGHT') body.weight_kg = weight
+      if (mode === 'WEIGHT') body.weight_kg = weight || null
       else body.price_som = directAmount
       body.paid_som = paid === '' ? accrual : paid
+      if (manualCost !== '') {
+        body.cost_som = manualCost
+        body.cost_is_manual = true
+      } else {
+        body.cost_is_manual = false
+      }
       if (isEdit) await api.patch(`/sales/${editing.id}/`, body)
       else await api.post('/sales/', body)
       onSaved()
@@ -245,8 +255,8 @@ function SaleForm({ editing, accounts, onClose, onSaved }) {
 
         {mode === 'WEIGHT' ? (
           <div className="row row-wrap">
-            <Field label="Вес, кг" hint="Цена считается от веса (3$ × курс)">
-              <input className="input" type="number" step="0.001" min="0" value={weight} onChange={(e) => setWeight(e.target.value)} placeholder="0.80" required />
+            <Field label="Вес, кг (необязательно)" hint="Цена считается от веса (3$ × курс)">
+              <input className="input" type="number" step="0.001" min="0" value={weight} onChange={(e) => setWeight(e.target.value)} placeholder="0.80" />
             </Field>
             <Field label="Кол-во мест">
               <input className="input" type="number" min="1" value={places} onChange={(e) => setPlaces(e.target.value)} />
@@ -285,15 +295,22 @@ function SaleForm({ editing, accounts, onClose, onSaved }) {
           </Field>
         </div>
 
+        <div className="row row-wrap">
+          <Field label="Себестоимость, сом (вручную)" hint="Пусто = авторасчёт по весу">
+            <input className="input" type="number" step="0.01" min="0" value={manualCost} onChange={(e) => setManualCost(e.target.value)} placeholder={autoCost ? String(autoCost) : '0.00'} />
+          </Field>
+        </div>
+
         <div className="card card-soft" style={{ padding: 16 }}>
           <div className="caption" style={{ marginBottom: 8 }}>
-            Расчёт {mode === 'WEIGHT' ? '(3$/кг · курс 90 · динамическая себестоимость)' : '(прямая сумма)'}
+            Расчёт {mode === 'WEIGHT' ? '(3$/кг · курс 90)' : '(прямая сумма)'}{manualCost !== '' ? ' · себестоимость вручную' : ''}
           </div>
           <div className="row row-wrap">
             <Stat label="Начислено" value={som(accrual)} />
+            <Stat label="Себестоимость" value={som(costValue)} />
             <Stat label="Оплачено" value={som(paidValue)} />
             <Stat label="Дебиторка" value={som(receivable)} tone={signClass(receivable)} />
-            {mode === 'WEIGHT' && <Stat label="Маржа" value={som(quote?.margin_som)} tone={signClass(quote?.margin_som)} />}
+            <Stat label="Маржа" value={som(margin)} tone={signClass(margin)} />
           </div>
         </div>
       </form>

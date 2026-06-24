@@ -37,7 +37,8 @@ export default function Settings() {
         price_per_kg_usd: form.price_per_kg_usd,
         usd_rate_som: form.usd_rate_som,
         cny_to_kgs_rate: form.cny_to_kgs_rate,
-        profit_tax_rate: form.profit_tax_rate,
+        cash_tax_rate: form.cash_tax_rate,
+        noncash_tax_rate: form.noncash_tax_rate,
       })
       setForm(data)
       setOk('Настройки сохранены. Новые продажи будут считаться по обновлённым параметрам.')
@@ -113,14 +114,25 @@ export default function Settings() {
                 required
               />
             </Field>
-            <Field label="Ставка налога на прибыль, %" hint="Для строки «Чистая прибыль» в ООПИУ">
+            <Field label="Налог — наличные, %" hint="На прибыль до налогов, нал-канал">
               <input
                 className="input"
                 type="number"
                 step="0.01"
                 min="0"
-                value={form.profit_tax_rate}
-                onChange={(e) => update('profit_tax_rate', e.target.value)}
+                value={form.cash_tax_rate}
+                onChange={(e) => update('cash_tax_rate', e.target.value)}
+                required
+              />
+            </Field>
+            <Field label="Налог — безнал, %" hint="На прибыль до налогов, безнал-канал">
+              <input
+                className="input"
+                type="number"
+                step="0.01"
+                min="0"
+                value={form.noncash_tax_rate}
+                onChange={(e) => update('noncash_tax_rate', e.target.value)}
                 required
               />
             </Field>

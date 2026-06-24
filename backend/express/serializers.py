@@ -29,7 +29,8 @@ class SaleSerializer(serializers.ModelSerializer):
             "price_som",        # начисление (writable in DIRECT mode; recomputed in WEIGHT)
             "paid_som",         # оплата
             "receivable_som",   # дебиторка
-            "cost_som",
+            "cost_som",          # себестоимость (writable при cost_is_manual=true)
+            "cost_is_manual",
             "margin_som",
             "date",             # дата операции (ОПиУ)
             "payment_date",     # дата оплаты (ОДДС)
@@ -39,7 +40,6 @@ class SaleSerializer(serializers.ModelSerializer):
             "price_per_kg_usd",
             "usd_rate_som",
             "cost_per_kg_som",
-            "cost_som",
             "margin_som",
             "created_at",
         )
@@ -48,17 +48,14 @@ class SaleSerializer(serializers.ModelSerializer):
             "paid_som": {"required": False},
             "payment_date": {"required": False},
             "weight_kg": {"required": False},
+            "cost_som": {"required": False},
+            "cost_is_manual": {"required": False},
         }
 
     def validate(self, attrs):
         mode = attrs.get("amount_mode", getattr(self.instance, "amount_mode", Sale.AmountMode.WEIGHT))
-        weight = attrs.get("weight_kg", getattr(self.instance, "weight_kg", None))
         price = attrs.get("price_som", getattr(self.instance, "price_som", None))
-
-        if mode == Sale.AmountMode.WEIGHT:
-            if not weight or weight <= 0:
-                raise serializers.ValidationError({"weight_kg": "Укажите вес больше нуля."})
-        else:  # DIRECT
-            if price in (None, "") or price <= 0:
-                raise serializers.ValidationError({"price_som": "Укажите сумму больше нуля."})
+        # Вес необязателен (Express/общий). В режиме «прямая сумма» нужна сумма.
+        if mode == Sale.AmountMode.DIRECT and (price in (None, "") or price <= 0):
+            raise serializers.ValidationError({"price_som": "Укажите сумму больше нуля."})
         return attrs

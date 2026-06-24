@@ -14,6 +14,8 @@ class AppSettingsSerializer(serializers.ModelSerializer):
             "usd_rate_som",
             "cny_to_kgs_rate",
             "profit_tax_rate",
+            "cash_tax_rate",
+            "noncash_tax_rate",
             "updated_at",
         )
         read_only_fields = ("updated_at",)
