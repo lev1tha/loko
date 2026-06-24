@@ -22,8 +22,18 @@ DEBUG = config("DEBUG", default=True, cast=bool)
 
 ALLOWED_HOSTS = config("ALLOWED_HOSTS", default="*", cast=Csv())
 
-# Behind Cloudflare Tunnel the app speaks HTTP locally but is HTTPS publicly.
+# Behind a TLS-terminating reverse proxy (Cloudflare Tunnel or host nginx) the
+# app speaks HTTP locally but is HTTPS publicly.
 USE_CLOUDFLARE = config("USE_CLOUDFLARE", default=not DEBUG, cast=bool)
+
+# Fail closed in production: never boot with the public, insecure dev SECRET_KEY.
+if not DEBUG and (not SECRET_KEY or SECRET_KEY.startswith("django-insecure-")):
+    from django.core.exceptions import ImproperlyConfigured
+
+    raise ImproperlyConfigured(
+        "SECRET_KEY must be a strong secret when DEBUG=False. "
+        'Generate one: python -c "import secrets; print(secrets.token_urlsafe(64))"'
+    )
 
 
 # Application definition
@@ -40,6 +50,7 @@ DJANGO_APPS = [
 THIRD_PARTY_APPS = [
     "rest_framework",
     "rest_framework_simplejwt",
+    "drf_spectacular",
     "corsheaders",
 ]
 
@@ -174,6 +185,24 @@ REST_FRAMEWORK = {
     ),
     "DEFAULT_PAGINATION_CLASS": "loko.pagination.StandardPagination",
     "PAGE_SIZE": 50,
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+}
+
+
+# drf-spectacular — OpenAPI 3 schema + Swagger/Redoc UI (/api/schema/, /api/docs/).
+SPECTACULAR_SETTINGS = {
+    "TITLE": "Loko ERP API",
+    "DESCRIPTION": (
+        "API ERP-системы Loko (Express + Business): продажи, расходы, переводы, "
+        "депозиты, задолженности и отчёты ОПиУ/ОДДС."
+    ),
+    "VERSION": "1.0.0",
+    "SERVE_INCLUDE_SCHEMA": False,
+    # Schema + Swagger/Redoc are NOT public — they expose the whole API surface.
+    "SERVE_PERMISSIONS": ["rest_framework.permissions.IsAuthenticated"],
+    # No SERVERS entry: paths already carry the /api prefix (urlconf include),
+    # so adding url:/api would double-prefix Swagger "Try it out" → /api/api/…
+    "COMPONENT_SPLIT_REQUEST": True,
 }
 
 

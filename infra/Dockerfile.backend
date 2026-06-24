@@ -1,0 +1,22 @@
+# Loko ERP backend — Django 6.0 + gunicorn.
+FROM python:3.13-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /app
+
+# psycopg2-binary bundles libpq — no system build/runtime deps required.
+COPY backend/requirements.txt ./
+RUN pip install --upgrade pip && pip install -r requirements.txt
+
+COPY backend/ ./
+COPY infra/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+EXPOSE 8000
+ENTRYPOINT ["/entrypoint.sh"]
+# Bind to all interfaces inside the container; trust X-Forwarded-* from host nginx.
+CMD ["gunicorn", "loko.wsgi:application", "-c", "gunicorn.conf.py", "-b", "0.0.0.0:8000", "--forwarded-allow-ips=*"]

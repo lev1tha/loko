@@ -1,0 +1,54 @@
+# Loko ERP — production stack (Django + PostgreSQL) behind host nginx + certbot.
+#
+#   cd infra && cp .env.example .env && nano .env       # fill SECRET_KEY, password…
+#   docker compose up -d --build                         # db + backend
+#   docker compose --profile build run --rm --build frontend   # build SPA → $WEB_DIR
+name: loko
+
+services:
+  db:
+    image: postgres:17
+    command: ["-p", "5434"]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-loko}
+      POSTGRES_USER: ${POSTGRES_USER:-lokobooking}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in infra/.env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5434:5434"          # local access only; never exposed publicly
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lokobooking} -d ${POSTGRES_DB:-loko} -p 5434"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.backend
+    env_file: ./.env
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8000:8000"          # host nginx proxies here; not exposed publicly
+    volumes:
+      - "${MEDIA_DIR:-/srv/loko/media}:/app/media"
+    restart: unless-stopped
+
+  # One-shot SPA builder — outputs dist/ into $WEB_DIR for host nginx to serve.
+  #   docker compose --profile build run --rm --build frontend
+  frontend:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.frontend
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-https://api.lokobooking.com/api}
+    volumes:
+      - "${WEB_DIR:-/srv/www/lokobooking}:/out"
+    profiles: ["build"]
+
+volumes:
+  pgdata:

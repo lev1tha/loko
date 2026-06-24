@@ -2,6 +2,11 @@ from django.contrib import admin
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenRefreshView
+from drf_spectacular.views import (
+    SpectacularAPIView,
+    SpectacularRedocView,
+    SpectacularSwaggerView,
+)
 
 from accounts.views import LokoTokenObtainPairView, UserViewSet
 from business.views import DebtViewSet, DepositViewSet
@@ -40,6 +45,10 @@ api_urlpatterns = [
     path("reports/debts/", debts_report, name="debts"),
     path("reports/business-orders/", business_orders_report, name="business_orders"),
     path("reports/breakdown/", breakdown_report, name="breakdown"),
+    # OpenAPI schema + interactive docs (Swagger / Redoc)
+    path("schema/", SpectacularAPIView.as_view(), name="schema"),
+    path("docs/", SpectacularSwaggerView.as_view(url_name="api:schema"), name="swagger-ui"),
+    path("redoc/", SpectacularRedocView.as_view(url_name="api:schema"), name="redoc"),
     # Router (CRUD resources)
     *router.urls,
 ]

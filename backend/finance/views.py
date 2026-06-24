@@ -4,6 +4,9 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import OpenApiParameter, extend_schema
+
 from accounts.permissions import IsAdmin
 from .models import Account, AppSettings, Expense, Transfer
 from .reports import (
@@ -31,6 +34,15 @@ def _period_params(request):
     return date_from, date_to, payment
 
 
+# Reusable OpenAPI query parameters shared by the report endpoints.
+PERIOD_PARAMS = [
+    OpenApiParameter("from", OpenApiTypes.DATE, description="Начало периода (YYYY-MM-DD)"),
+    OpenApiParameter("to", OpenApiTypes.DATE, description="Конец периода (YYYY-MM-DD)"),
+    OpenApiParameter("payment", OpenApiTypes.STR, enum=["all", "cash", "noncash"], description="Вид оплаты"),
+    OpenApiParameter("module", OpenApiTypes.STR, enum=["EXPRESS", "BUSINESS"], description="Направление (пусто = всё)"),
+]
+
+
 class AppSettingsView(APIView):
     """Singleton settings — readable by all, editable by admins only."""
 
@@ -39,12 +51,15 @@ class AppSettingsView(APIView):
             return [IsAdmin()]
         return [IsAuthenticated()]
 
+    @extend_schema(responses=AppSettingsSerializer)
     def get(self, request):
         return Response(AppSettingsSerializer(AppSettings.load()).data)
 
+    @extend_schema(request=AppSettingsSerializer, responses=AppSettingsSerializer)
     def put(self, request):
         return self._update(request)
 
+    @extend_schema(request=AppSettingsSerializer, responses=AppSettingsSerializer)
     def patch(self, request):
         return self._update(request)
 
@@ -118,6 +133,12 @@ class TransferViewSet(viewsets.ModelViewSet):
         serializer.save(created_by=self.request.user)
 
 
+@extend_schema(
+    parameters=PERIOD_PARAMS
+    + [OpenApiParameter("tax_rate", OpenApiTypes.NUMBER, description="Ставка налога %, пусто = из настроек")],
+    responses=OpenApiTypes.OBJECT,
+    tags=["reports"],
+)
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def pnl_report(request):
@@ -127,6 +148,7 @@ def pnl_report(request):
     return Response(build_pnl(date_from, date_to, payment, tax_rate=tax_rate, module=module))
 
 
+@extend_schema(parameters=PERIOD_PARAMS, responses=OpenApiTypes.OBJECT, tags=["reports"])
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def cashflow_report(request):
@@ -135,6 +157,11 @@ def cashflow_report(request):
     return Response(build_cashflow(date_from, date_to, payment, module=module))
 
 
+@extend_schema(
+    parameters=[OpenApiParameter("module", OpenApiTypes.STR, enum=["EXPRESS", "BUSINESS"], description="Направление")],
+    responses=OpenApiTypes.OBJECT,
+    tags=["reports"],
+)
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def balances(request):
@@ -142,12 +169,14 @@ def balances(request):
     return Response(accounts_snapshot(module=module))
 
 
+@extend_schema(responses=OpenApiTypes.OBJECT, tags=["reports"])
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def debts_report(request):
     return Response(debts_summary())
 
 
+@extend_schema(parameters=PERIOD_PARAMS, responses=OpenApiTypes.OBJECT, tags=["reports"])
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def business_orders_report(request):
@@ -155,6 +184,20 @@ def business_orders_report(request):
     return Response(business_orders(date_from, date_to))
 
 
+@extend_schema(
+    parameters=PERIOD_PARAMS
+    + [
+        OpenApiParameter(
+            "line",
+            OpenApiTypes.STR,
+            description="Строка отчёта: revenue | express_revenue | deposit_revenue | cogs | opex | "
+            "opex_<СТАТЬЯ> | other | supplier | owner | inflow | outflow",
+        ),
+        OpenApiParameter("basis", OpenApiTypes.STR, enum=["accrual", "cash"], description="accrual = ОПиУ, cash = ОДДС"),
+    ],
+    responses=OpenApiTypes.OBJECT,
+    tags=["reports"],
+)
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def breakdown_report(request):

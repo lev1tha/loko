@@ -1,7 +1,9 @@
-from rest_framework import viewsets
+from rest_framework import serializers, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+
+from drf_spectacular.utils import extend_schema, inline_serializer
 
 from .models import Debt, Deposit
 from .serializers import DebtSerializer, DepositSerializer
@@ -29,6 +31,10 @@ class DepositViewSet(viewsets.ModelViewSet):
         # Deposits are NOT revenue on creation — they stay HELD until recognized.
         serializer.save(created_by=self.request.user)
 
+    @extend_schema(
+        request=inline_serializer("DepositRecognizeRequest", {"date": serializers.DateField(required=False)}),
+        responses=DepositSerializer,
+    )
     @action(detail=True, methods=["post"])
     def recognize(self, request, pk=None):
         """Признать депозит как выручку."""
@@ -40,6 +46,13 @@ class DepositViewSet(viewsets.ModelViewSet):
         deposit.recognize_as_revenue(when=request.data.get("date"))
         return Response(DepositSerializer(deposit).data)
 
+    @extend_schema(
+        request=inline_serializer(
+            "DepositSendSupplierRequest",
+            {"date": serializers.DateField(required=False), "supplier": serializers.CharField(required=False)},
+        ),
+        responses=DepositSerializer,
+    )
     @action(detail=True, methods=["post"], url_path="send-to-supplier")
     def send_to_supplier(self, request, pk=None):
         """Отправить депозит поставщику как предоплату (создаёт расход)."""
@@ -70,6 +83,7 @@ class DebtViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
 
+    @extend_schema(request=None, responses=DebtSerializer)
     @action(detail=True, methods=["post"])
     def close(self, request, pk=None):
         """Отметить задолженность погашенной."""

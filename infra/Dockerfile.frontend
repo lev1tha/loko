@@ -1,0 +1,15 @@
+# Loko ERP frontend — build the Vite SPA, then publish dist/ into a mounted /out.
+FROM node:22-slim
+
+WORKDIR /app
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+
+COPY frontend/ ./
+# Baked into the bundle at build time — point the SPA at the public API.
+ARG VITE_API_BASE_URL=https://api.lokobooking.com/api
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+RUN npm run build
+
+# At run time, copy the built assets into the bind-mounted /out (host nginx root).
+CMD ["sh", "-c", "rm -rf /out/* && cp -a /app/dist/. /out/ && echo 'SPA published to /out'"]
