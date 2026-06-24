@@ -1,0 +1,79 @@
+from rest_framework import viewsets
+from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+
+from .models import Debt, Deposit
+from .serializers import DebtSerializer, DepositSerializer
+
+
+class DepositViewSet(viewsets.ModelViewSet):
+    serializer_class = DepositSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        qs = Deposit.objects.select_related("account").all()
+        params = self.request.query_params
+        status = params.get("status")
+        date_from = params.get("from")
+        date_to = params.get("to")
+        if status:
+            qs = qs.filter(status=status)
+        if date_from:
+            qs = qs.filter(date__gte=date_from)
+        if date_to:
+            qs = qs.filter(date__lte=date_to)
+        return qs
+
+    def perform_create(self, serializer):
+        # Deposits are NOT revenue on creation — they stay HELD until recognized.
+        serializer.save(created_by=self.request.user)
+
+    @action(detail=True, methods=["post"])
+    def recognize(self, request, pk=None):
+        """Признать депозит как выручку."""
+        deposit = self.get_object()
+        if deposit.status == Deposit.Status.SENT_SUPPLIER:
+            return Response(
+                {"detail": "Депозит уже отправлен поставщику."}, status=400
+            )
+        deposit.recognize_as_revenue(when=request.data.get("date"))
+        return Response(DepositSerializer(deposit).data)
+
+    @action(detail=True, methods=["post"], url_path="send-to-supplier")
+    def send_to_supplier(self, request, pk=None):
+        """Отправить депозит поставщику как предоплату (создаёт расход)."""
+        deposit = self.get_object()
+        if deposit.status == Deposit.Status.SENT_SUPPLIER:
+            return Response({"detail": "Уже отправлен поставщику."}, status=400)
+        deposit.send_to_supplier(
+            when=request.data.get("date"), supplier=request.data.get("supplier")
+        )
+        return Response(DepositSerializer(deposit).data)
+
+
+class DebtViewSet(viewsets.ModelViewSet):
+    serializer_class = DebtSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        qs = Debt.objects.all()
+        params = self.request.query_params
+        kind = params.get("kind")
+        status = params.get("status")
+        if kind:
+            qs = qs.filter(kind=kind)
+        if status:
+            qs = qs.filter(status=status)
+        return qs
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
+    @action(detail=True, methods=["post"])
+    def close(self, request, pk=None):
+        """Отметить задолженность погашенной."""
+        debt = self.get_object()
+        debt.status = Debt.Status.CLOSED
+        debt.save(update_fields=["status"])
+        return Response(DebtSerializer(debt).data)

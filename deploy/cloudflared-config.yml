@@ -1,0 +1,23 @@
+# Cloudflare Tunnel config — exposes the local Django (gunicorn) port
+# to the public hostname api.loko.kg WITHOUT opening any inbound ports.
+#
+# Setup (run on the VPS, once):
+#   cloudflared tunnel login
+#   cloudflared tunnel create loko-api
+#   # copy the generated <TUNNEL_ID>.json credentials path below
+#   cloudflared tunnel route dns loko-api api.loko.kg
+#   sudo cp this file to /etc/cloudflared/config.yml
+#   sudo cloudflared service install
+#
+tunnel: loko-api
+credentials-file: /etc/cloudflared/<TUNNEL_ID>.json
+
+ingress:
+  # Public API → local gunicorn
+  - hostname: api.loko.kg
+    service: http://localhost:8000
+    originRequest:
+      connectTimeout: 30s
+      httpHostHeader: api.loko.kg
+  # Everything else returns 404
+  - service: http_status:404

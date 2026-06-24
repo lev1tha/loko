@@ -1,0 +1,11 @@
+# Cloudflare Pages configuration for the Loko ERP frontend.
+# Deploy with:  npx wrangler pages deploy dist
+name = "loko-erp"
+compatibility_date = "2024-11-01"
+pages_build_output_dir = "dist"
+
+# Build settings (used by the Cloudflare Pages Git integration; CLI uses npm directly):
+#   Build command:        npm run build
+#   Build output dir:     dist
+#   Root directory:       frontend
+#   Node version:         20  (set NODE_VERSION=20 in Pages env vars)
