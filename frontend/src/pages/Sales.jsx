@@ -23,6 +23,8 @@ export default function Sales() {
   const [form, setForm] = useState(null) // null=закрыто, 'new', или объект продажи (редактирование)
   const [busyId, setBusyId] = useState(null)
   const [error, setError] = useState('')
+  const [editCell, setEditCell] = useState(null) // inline-правка суммы в таблице: {id, value}
+  const [savingCell, setSavingCell] = useState(false)
 
   const params = { from, to, payment, search: search || undefined, page_size: 10000 }
   const sales = useFetch('/sales/', params)
@@ -49,6 +51,30 @@ export default function Sales() {
       setError(errorMessage(err))
     } finally {
       setBusyId(null)
+    }
+  }
+
+  // Двойной клик по «Оплачено» → быстрая правка суммы прямо в таблице.
+  // Express: оплата = цена, поэтому ставим ручную сумму (режим «прямая сумма»),
+  // оплата приравнивается к начислению (paid_som=null → бэкенд подставит цену).
+  async function saveCell(r) {
+    const raw = editCell?.value
+    if (raw === '' || raw == null || Number(raw) < 0 || Number(raw) === Number(r.price_som)) {
+      setEditCell(null)
+      return
+    }
+    setSavingCell(true)
+    setError('')
+    try {
+      await api.patch(`/sales/${r.id}/`, {
+        amount_mode: 'DIRECT', price_som: raw, paid_som: null, cost_is_manual: false,
+      })
+      setEditCell(null)
+      refresh()
+    } catch (err) {
+      setError(errorMessage(err))
+    } finally {
+      setSavingCell(false)
     }
   }
 
@@ -118,7 +144,31 @@ export default function Sales() {
                       <Badge variant={r.is_cash ? 'badge-cash' : 'badge-bank'}>{r.account_name}</Badge>
                     </td>
                     <td className="num">{som(r.price_som)}</td>
-                    <td className="num">{som(r.paid_som)}</td>
+                    <td
+                      className="num cell-edit"
+                      onDoubleClick={() => setEditCell({ id: r.id, value: String(r.price_som ?? '') })}
+                      title="Двойной клик — изменить сумму"
+                    >
+                      {editCell?.id === r.id ? (
+                        <input
+                          className="input input-cell"
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          autoFocus
+                          disabled={savingCell}
+                          value={editCell.value}
+                          onChange={(e) => setEditCell({ id: r.id, value: e.target.value })}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') saveCell(r)
+                            if (e.key === 'Escape') setEditCell(null)
+                          }}
+                          onBlur={() => saveCell(r)}
+                        />
+                      ) : (
+                        som(r.paid_som)
+                      )}
+                    </td>
                     <td className={`num ${signClass(r.receivable_som)}`}>{som(r.receivable_som)}</td>
                     <td className={`num ${signClass(r.margin_som)}`}>{som(r.margin_som)}</td>
                     <td className="num">
@@ -163,10 +213,6 @@ function SaleForm({ editing, accounts, onClose, onSaved }) {
   const [places, setPlaces] = useState(String(editing?.places || '1'))
   const [accountId, setAccountId] = useState(editing?.account || accounts[0]?.id || '')
   const [date, setDate] = useState(editing?.date || today())
-  const [paid, setPaid] = useState(isEdit ? editing.paid_som : '')
-  // Дата оплаты по умолчанию — сегодня (для новой); при редактировании — как в записи.
-  const [paymentDate, setPaymentDate] = useState(editing?.payment_date || today())
-  const [manualCost, setManualCost] = useState(isEdit && editing.cost_is_manual ? String(editing.cost_som) : '')
   const [quote, setQuote] = useState(null)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
@@ -190,11 +236,9 @@ function SaleForm({ editing, accounts, onClose, onSaved }) {
   }, [weight, mode])
 
   const accrual = mode === 'WEIGHT' ? Number(quote?.price_som || 0) : Number(directAmount || 0)
-  const paidValue = paid === '' ? accrual : Number(paid)
-  const receivable = accrual - paidValue
+  // Себестоимость — динамическая, от веса по ставке из Настроек (см. AppSettings).
   const autoCost = mode === 'WEIGHT' ? Number(quote?.cost_som || 0) : 0
-  const costValue = manualCost !== '' ? Number(manualCost) : autoCost
-  const margin = accrual - costValue
+  const margin = accrual - autoCost
 
   async function submit(e) {
     e.preventDefault()
@@ -207,17 +251,13 @@ function SaleForm({ editing, accounts, onClose, onSaved }) {
         places: Number(places) || 1,
         account: accountId,
         date,
-        payment_date: paymentDate || date,
+        cost_is_manual: false, // себестоимость всегда автоматическая (ставка из Настроек)
       }
       if (mode === 'WEIGHT') body.weight_kg = weight || null
       else body.price_som = directAmount
-      body.paid_som = paid === '' ? accrual : paid
-      if (manualCost !== '') {
-        body.cost_som = manualCost
-        body.cost_is_manual = true
-      } else {
-        body.cost_is_manual = false
-      }
+      // Express: оплата всегда полная в день операции (начислено = оплачено).
+      body.paid_som = null
+      body.payment_date = null
       if (isEdit) await api.patch(`/sales/${editing.id}/`, body)
       else await api.post('/sales/', body)
       onSaved()
@@ -255,7 +295,7 @@ function SaleForm({ editing, accounts, onClose, onSaved }) {
 
         {mode === 'WEIGHT' ? (
           <div className="row row-wrap">
-            <Field label="Вес, кг (необязательно)" hint="Цена считается от веса (3$ × курс)">
+            <Field label="Вес, кг" hint="Необязателен. Цена и себестоимость — от веса">
               <input className="input" type="number" step="0.001" min="0" value={weight} onChange={(e) => setWeight(e.target.value)} placeholder="0.80" />
             </Field>
             <Field label="Кол-во мест">
@@ -281,36 +321,26 @@ function SaleForm({ editing, accounts, onClose, onSaved }) {
               ))}
             </select>
           </Field>
-          <Field label="Дата операции (ОПиУ)">
+          <Field label="Дата операции">
             <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
           </Field>
         </div>
 
-        <div className="row row-wrap">
-          <Field label="Оплачено, сом" hint="Пусто = оплачено полностью">
-            <input className="input" type="number" step="0.01" min="0" value={paid} onChange={(e) => setPaid(e.target.value)} placeholder={accrual ? String(accrual) : '0.00'} />
-          </Field>
-          <Field label="Дата оплаты (ОДДС)" hint="По умолчанию — сегодня">
-            <input className="input" type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} />
-          </Field>
-        </div>
-
-        <div className="row row-wrap">
-          <Field label="Себестоимость, сом (вручную)" hint="Пусто = авторасчёт по весу">
-            <input className="input" type="number" step="0.01" min="0" value={manualCost} onChange={(e) => setManualCost(e.target.value)} placeholder={autoCost ? String(autoCost) : '0.00'} />
-          </Field>
-        </div>
-
-        <div className="card card-soft" style={{ padding: 16 }}>
-          <div className="caption" style={{ marginBottom: 8 }}>
-            Расчёт {mode === 'WEIGHT' ? '(3$/кг · курс 90)' : '(прямая сумма)'}{manualCost !== '' ? ' · себестоимость вручную' : ''}
-          </div>
-          <div className="row row-wrap">
-            <Stat label="Начислено" value={som(accrual)} />
-            <Stat label="Себестоимость" value={som(costValue)} />
-            <Stat label="Оплачено" value={som(paidValue)} />
-            <Stat label="Дебиторка" value={som(receivable)} tone={signClass(receivable)} />
-            <Stat label="Маржа" value={som(margin)} tone={signClass(margin)} />
+        <div className="card card-soft sale-preview">
+          <div className="caption">Расчёт · {mode === 'WEIGHT' ? 'по весу' : 'прямая сумма'}</div>
+          <div className="preview-grid">
+            <div className="preview-cell">
+              <span className="preview-label">Начислено</span>
+              <span className="preview-value">{som(accrual)}</span>
+            </div>
+            <div className="preview-cell">
+              <span className="preview-label">Себестоимость</span>
+              <span className="preview-value">{som(autoCost)}</span>
+            </div>
+            <div className="preview-cell">
+              <span className="preview-label">Маржа</span>
+              <span className={`preview-value ${signClass(margin)}`}>{som(margin)}</span>
+            </div>
           </div>
         </div>
       </form>

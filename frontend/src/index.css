@@ -272,6 +272,10 @@ textarea.input { height: auto; padding: 10px 14px; resize: vertical; min-height:
 /* ===== Generic helpers ===== */
 .row { display: flex; gap: var(--s-md); align-items: center; }
 .row-wrap { flex-wrap: wrap; }
+/* Поля внутри строки — равные, тянущиеся, аккуратно переносятся (формы) */
+.row > .field { flex: 1 1 160px; min-width: 0; }
+/* Строки с полями выравниваем по верху, чтобы подпись-hint не «съезжала» (формы) */
+.row:has(> .field) { align-items: flex-start; }
 .col { display: flex; flex-direction: column; gap: var(--s-md); }
 .spread { display: flex; align-items: center; justify-content: space-between; gap: var(--s-md); }
 .grow { flex: 1; }
@@ -294,6 +298,35 @@ textarea.input { height: auto; padding: 10px 14px; resize: vertical; min-height:
   align-items: flex-end;
 }
 .toolbar .field { min-width: 150px; flex: 1 1 auto; }
+
+/* ===== Inline-editable table cell ===== */
+.cell-edit { cursor: pointer; }
+.cell-edit:hover { text-decoration: underline dotted; text-underline-offset: 3px; }
+.input-cell {
+  height: 32px;
+  width: 120px;
+  padding: 0 8px;
+  font-size: 14px;
+  text-align: right;
+  display: inline-block;
+}
+
+/* ===== Compact calculation preview (forms) ===== */
+.sale-preview { color: var(--ink); padding: var(--s-md); }
+.preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: var(--s-sm) var(--s-md);
+  margin-top: var(--s-sm);
+}
+.preview-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.preview-label { font-size: 12px; color: var(--muted); font-weight: 500; }
+.preview-value {
+  font-size: 17px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: var(--display-tracking);
+}
 
 /* ===== Segmented pill control ===== */
 .segmented {
