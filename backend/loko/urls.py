@@ -12,6 +12,7 @@ from finance.views import (
     ExpenseViewSet,
     TransferViewSet,
     balances,
+    breakdown_report,
     business_orders_report,
     cashflow_report,
     debts_report,
@@ -38,6 +39,7 @@ api_urlpatterns = [
     path("reports/balances/", balances, name="balances"),
     path("reports/debts/", debts_report, name="debts"),
     path("reports/business-orders/", business_orders_report, name="business_orders"),
+    path("reports/breakdown/", breakdown_report, name="breakdown"),
     # Router (CRUD resources)
     *router.urls,
 ]

@@ -245,6 +245,7 @@ textarea.input { height: auto; padding: 10px 14px; resize: vertical; min-height:
 .table tbody tr:hover { background: var(--surface-soft); }
 .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .table tr.pnl-level td { background: var(--surface-soft); border-bottom: 1px solid var(--hairline); }
+.table tr.drillable:hover td { background: #eef4ff; }
 .pos { color: var(--success); }
 .neg { color: var(--error); }
 

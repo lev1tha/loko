@@ -3,7 +3,7 @@ import api, { errorMessage } from '../api/client'
 import { useFetch, asList } from '../lib/hooks'
 import { firstOfMonth, today, money, dateRu, signClass } from '../lib/format'
 import { Alert, Badge, EmptyState, Field, Modal, Segmented, Spinner } from '../components/ui'
-import { IconPlus } from '../components/icons'
+import { IconPlus, IconEdit, IconTrash } from '../components/icons'
 
 const MODULES = [
   { value: 'all', label: 'Всё' },
@@ -41,7 +41,9 @@ export default function Expenses() {
   const [to, setTo] = useState(today())
   const [category, setCategory] = useState('')
   const [module, setModule] = useState('all')
-  const [showForm, setShowForm] = useState(false)
+  const [form, setForm] = useState(null) // null | 'new' | объект расхода
+  const [busyId, setBusyId] = useState(null)
+  const [error, setError] = useState('')
 
   const params = {
     from,
@@ -56,8 +58,23 @@ export default function Expenses() {
   const total = expenses.data?.count ?? rows.length
   const totalSum = rows.reduce((acc, e) => acc + Number(e.amount || 0), 0)
 
+  async function remove(e) {
+    if (!window.confirm(`Удалить расход «${e.category_display}» на ${money(e.amount)}?`)) return
+    setBusyId(e.id)
+    setError('')
+    try {
+      await api.delete(`/expenses/${e.id}/`)
+      expenses.reload()
+    } catch (err) {
+      setError(errorMessage(err))
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   return (
     <>
+      {error && <Alert kind="error">{error}</Alert>}
       <div className="card">
         <div className="card-header">
           <div className="toolbar grow">
@@ -80,7 +97,7 @@ export default function Expenses() {
               <Segmented value={module} onChange={setModule} options={MODULES} />
             </div>
           </div>
-          <button className="btn btn-primary" onClick={() => setShowForm(true)}>
+          <button className="btn btn-primary" onClick={() => setForm('new')}>
             <IconPlus size={18} /> Новый расход
           </button>
         </div>
@@ -107,6 +124,7 @@ export default function Expenses() {
                   <th className="num">Начислено</th>
                   <th className="num">Оплачено</th>
                   <th className="num">Кредиторка</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -119,6 +137,16 @@ export default function Expenses() {
                     <td className="num neg">−{money(e.amount)}</td>
                     <td className="num">{money(e.paid_amount)}</td>
                     <td className={`num ${signClass(e.payable)}`}>{money(e.payable)}</td>
+                    <td className="num">
+                      <div className="row gap-sm" style={{ justifyContent: 'flex-end' }}>
+                        <button className="btn btn-icon btn-ghost btn-sm" title="Изменить" onClick={() => setForm(e)}>
+                          <IconEdit size={16} />
+                        </button>
+                        <button className="btn btn-icon btn-danger btn-sm" title="Удалить" disabled={busyId === e.id} onClick={() => remove(e)}>
+                          <IconTrash size={16} />
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -127,12 +155,13 @@ export default function Expenses() {
         )}
       </div>
 
-      {showForm && (
+      {form && (
         <ExpenseForm
+          editing={form === 'new' ? null : form}
           accounts={asList(accounts.data)}
-          onClose={() => setShowForm(false)}
+          onClose={() => setForm(null)}
           onSaved={() => {
-            setShowForm(false)
+            setForm(null)
             expenses.reload()
           }}
         />
@@ -141,15 +170,17 @@ export default function Expenses() {
   )
 }
 
-function ExpenseForm({ accounts, onClose, onSaved }) {
-  const [category, setCategory] = useState('OPEX')
-  const [article, setArticle] = useState('RENT')
-  const [accountId, setAccountId] = useState(accounts[0]?.id || '')
-  const [amount, setAmount] = useState('')
-  const [paid, setPaid] = useState('')
-  const [paymentDate, setPaymentDate] = useState('')
-  const [description, setDescription] = useState('')
-  const [date, setDate] = useState(today())
+function ExpenseForm({ editing, accounts, onClose, onSaved }) {
+  const isEdit = !!editing
+  const [category, setCategory] = useState(editing?.category || 'OPEX')
+  const [article, setArticle] = useState(editing?.opex_article || 'RENT')
+  const [accountId, setAccountId] = useState(editing?.account || accounts[0]?.id || '')
+  const [amount, setAmount] = useState(editing?.amount || '')
+  const [paid, setPaid] = useState(isEdit ? editing.paid_amount : '')
+  // Дата оплаты по умолчанию — сегодня (новая); при редактировании — как в записи.
+  const [paymentDate, setPaymentDate] = useState(editing?.payment_date || today())
+  const [description, setDescription] = useState(editing?.description || '')
+  const [date, setDate] = useState(editing?.date || today())
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -166,16 +197,18 @@ function ExpenseForm({ accounts, onClose, onSaved }) {
     }
     setSaving(true)
     try {
-      await api.post('/expenses/', {
+      const body = {
         category,
         opex_article: isOpex ? article : null,
         account: accountId,
         amount,
-        paid_amount: paid !== '' ? paid : undefined,
+        paid_amount: paid !== '' ? paid : amount,
         payment_date: paymentDate || date,
         description: description.trim(),
         date,
-      })
+      }
+      if (isEdit) await api.patch(`/expenses/${editing.id}/`, body)
+      else await api.post('/expenses/', body)
       onSaved()
     } catch (err) {
       setError(errorMessage(err))
@@ -186,13 +219,13 @@ function ExpenseForm({ accounts, onClose, onSaved }) {
 
   return (
     <Modal
-      title="Новый расход"
+      title={isEdit ? 'Изменить расход' : 'Новый расход'}
       onClose={onClose}
       footer={
         <>
           <button className="btn btn-secondary" onClick={onClose}>Отмена</button>
           <button className="btn btn-primary" onClick={submit} disabled={saving}>
-            {saving ? 'Сохранение…' : 'Добавить расход'}
+            {saving ? 'Сохранение…' : isEdit ? 'Сохранить' : 'Добавить расход'}
           </button>
         </>
       }
@@ -236,7 +269,7 @@ function ExpenseForm({ accounts, onClose, onSaved }) {
           <Field label="Дата операции (ОПиУ)">
             <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
           </Field>
-          <Field label="Дата оплаты (ОДДС)" hint="Пусто = дата операции">
+          <Field label="Дата оплаты (ОДДС)" hint="По умолчанию — сегодня">
             <input className="input" type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} />
           </Field>
         </div>

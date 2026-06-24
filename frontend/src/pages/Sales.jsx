@@ -3,7 +3,7 @@ import api, { errorMessage } from '../api/client'
 import { useFetch, asList } from '../lib/hooks'
 import { firstOfMonth, today, som, kg, dateRu, signClass } from '../lib/format'
 import { Alert, Badge, EmptyState, Field, Modal, Segmented, Spinner, Stat } from '../components/ui'
-import { IconPlus } from '../components/icons'
+import { IconPlus, IconEdit, IconTrash } from '../components/icons'
 
 const PAYMENTS = [
   { value: 'all', label: 'Все' },
@@ -20,7 +20,9 @@ export default function Sales() {
   const [to, setTo] = useState(today())
   const [payment, setPayment] = useState('all')
   const [search, setSearch] = useState('')
-  const [showForm, setShowForm] = useState(false)
+  const [form, setForm] = useState(null) // null=закрыто, 'new', или объект продажи (редактирование)
+  const [busyId, setBusyId] = useState(null)
+  const [error, setError] = useState('')
 
   const params = { from, to, payment, search: search || undefined, page_size: 10000 }
   const sales = useFetch('/sales/', params)
@@ -36,8 +38,23 @@ export default function Sales() {
     summary.reload()
   }
 
+  async function remove(r) {
+    if (!window.confirm(`Удалить продажу «${r.client_code}» на ${som(r.price_som)}?`)) return
+    setBusyId(r.id)
+    setError('')
+    try {
+      await api.delete(`/sales/${r.id}/`)
+      refresh()
+    } catch (err) {
+      setError(errorMessage(err))
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   return (
     <>
+      {error && <Alert kind="error">{error}</Alert>}
       <div className="grid">
         <Stat label="Продаж за период" value={s.count || 0} sub={kg(s.weight)} />
         <Stat label="Начислено (выручка)" value={som(s.revenue)} />
@@ -63,7 +80,7 @@ export default function Sales() {
               <Segmented value={payment} onChange={setPayment} options={PAYMENTS} />
             </div>
           </div>
-          <button className="btn btn-primary" onClick={() => setShowForm(true)}>
+          <button className="btn btn-primary" onClick={() => setForm('new')}>
             <IconPlus size={18} /> Новая продажа
           </button>
         </div>
@@ -88,6 +105,7 @@ export default function Sales() {
                   <th className="num">Оплачено</th>
                   <th className="num">Дебиторка</th>
                   <th className="num">Маржа</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -103,6 +121,16 @@ export default function Sales() {
                     <td className="num">{som(r.paid_som)}</td>
                     <td className={`num ${signClass(r.receivable_som)}`}>{som(r.receivable_som)}</td>
                     <td className={`num ${signClass(r.margin_som)}`}>{som(r.margin_som)}</td>
+                    <td className="num">
+                      <div className="row gap-sm" style={{ justifyContent: 'flex-end' }}>
+                        <button className="btn btn-icon btn-ghost btn-sm" title="Изменить" onClick={() => setForm(r)}>
+                          <IconEdit size={16} />
+                        </button>
+                        <button className="btn btn-icon btn-danger btn-sm" title="Удалить" disabled={busyId === r.id} onClick={() => remove(r)}>
+                          <IconTrash size={16} />
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -111,12 +139,13 @@ export default function Sales() {
         )}
       </div>
 
-      {showForm && (
+      {form && (
         <SaleForm
+          editing={form === 'new' ? null : form}
           accounts={asList(accounts.data)}
-          onClose={() => setShowForm(false)}
+          onClose={() => setForm(null)}
           onSaved={() => {
-            setShowForm(false)
+            setForm(null)
             refresh()
           }}
         />
@@ -125,21 +154,23 @@ export default function Sales() {
   )
 }
 
-function SaleForm({ accounts, onClose, onSaved }) {
-  const [mode, setMode] = useState('WEIGHT')
-  const [clientCode, setClientCode] = useState('')
-  const [weight, setWeight] = useState('')
-  const [directAmount, setDirectAmount] = useState('')
-  const [places, setPlaces] = useState('1')
-  const [accountId, setAccountId] = useState(accounts[0]?.id || '')
-  const [date, setDate] = useState(today())
-  const [paid, setPaid] = useState('')
-  const [paymentDate, setPaymentDate] = useState('')
+function SaleForm({ editing, accounts, onClose, onSaved }) {
+  const isEdit = !!editing
+  const [mode, setMode] = useState(editing?.amount_mode || 'WEIGHT')
+  const [clientCode, setClientCode] = useState(editing?.client_code || '')
+  const [weight, setWeight] = useState(editing?.weight_kg || '')
+  const [directAmount, setDirectAmount] = useState(isEdit && editing.amount_mode === 'DIRECT' ? editing.price_som : '')
+  const [places, setPlaces] = useState(String(editing?.places || '1'))
+  const [accountId, setAccountId] = useState(editing?.account || accounts[0]?.id || '')
+  const [date, setDate] = useState(editing?.date || today())
+  const [paid, setPaid] = useState(isEdit ? editing.paid_som : '')
+  // Дата оплаты по умолчанию — сегодня (для новой); при редактировании — как в записи.
+  const [paymentDate, setPaymentDate] = useState(editing?.payment_date || today())
   const [quote, setQuote] = useState(null)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
-  // Live preview for WEIGHT mode.
+  // Live preview for WEIGHT mode (цена зависит от веса).
   useEffect(() => {
     if (mode !== 'WEIGHT') return
     const w = parseFloat(weight)
@@ -157,7 +188,6 @@ function SaleForm({ accounts, onClose, onSaved }) {
     }
   }, [weight, mode])
 
-  // Accrued amount (начисление) used as the default "оплачено".
   const accrual = mode === 'WEIGHT' ? Number(quote?.price_som || 0) : Number(directAmount || 0)
   const paidValue = paid === '' ? accrual : Number(paid)
   const receivable = accrual - paidValue
@@ -177,8 +207,9 @@ function SaleForm({ accounts, onClose, onSaved }) {
       }
       if (mode === 'WEIGHT') body.weight_kg = weight
       else body.price_som = directAmount
-      if (paid !== '') body.paid_som = paid
-      await api.post('/sales/', body)
+      body.paid_som = paid === '' ? accrual : paid
+      if (isEdit) await api.patch(`/sales/${editing.id}/`, body)
+      else await api.post('/sales/', body)
       onSaved()
     } catch (err) {
       setError(errorMessage(err))
@@ -189,13 +220,13 @@ function SaleForm({ accounts, onClose, onSaved }) {
 
   return (
     <Modal
-      title="Новая продажа"
+      title={isEdit ? `Продажа · ${editing.client_code}` : 'Новая продажа'}
       onClose={onClose}
       footer={
         <>
           <button className="btn btn-secondary" onClick={onClose}>Отмена</button>
           <button className="btn btn-primary" onClick={submit} disabled={saving}>
-            {saving ? 'Сохранение…' : 'Создать продажу'}
+            {saving ? 'Сохранение…' : isEdit ? 'Сохранить' : 'Создать продажу'}
           </button>
         </>
       }
@@ -214,7 +245,7 @@ function SaleForm({ accounts, onClose, onSaved }) {
 
         {mode === 'WEIGHT' ? (
           <div className="row row-wrap">
-            <Field label="Вес, кг" hint="Можно дробный: 0.80, 0.53">
+            <Field label="Вес, кг" hint="Цена считается от веса (3$ × курс)">
               <input className="input" type="number" step="0.001" min="0" value={weight} onChange={(e) => setWeight(e.target.value)} placeholder="0.80" required />
             </Field>
             <Field label="Кол-во мест">
@@ -249,7 +280,7 @@ function SaleForm({ accounts, onClose, onSaved }) {
           <Field label="Оплачено, сом" hint="Пусто = оплачено полностью">
             <input className="input" type="number" step="0.01" min="0" value={paid} onChange={(e) => setPaid(e.target.value)} placeholder={accrual ? String(accrual) : '0.00'} />
           </Field>
-          <Field label="Дата оплаты (ОДДС)" hint="Пусто = дата операции">
+          <Field label="Дата оплаты (ОДДС)" hint="По умолчанию — сегодня">
             <input className="input" type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} />
           </Field>
         </div>

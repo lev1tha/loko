@@ -90,6 +90,18 @@ export const IconMenu = (p) => (
     <path d="M3 12h18M3 6h18M3 18h18" />
   </Svg>
 )
+export const IconEdit = (p) => (
+  <Svg {...p}>
+    <path d="M12 20h9" />
+    <path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4 12.5-12.5z" />
+  </Svg>
+)
+export const IconTrash = (p) => (
+  <Svg {...p}>
+    <path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6" />
+    <path d="M10 11v6M14 11v6" />
+  </Svg>
+)
 export const IconBox = (p) => (
   <Svg {...p}>
     <path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z" />

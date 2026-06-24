@@ -472,3 +472,112 @@ def business_orders(date_from=None, date_to=None):
         "count": len(orders),
     }
     return {"orders": orders, "totals": totals}
+
+
+# ===========================================================================
+# Детальная расшифровка строки отчёта — «откуда деньги»
+# ===========================================================================
+BREAKDOWN_LABELS = {
+    "revenue": "Выручка",
+    "express_revenue": "Продажи Loko Express",
+    "deposit_revenue": "Депозиты, признанные как выручка",
+    "cogs": "Себестоимость",
+    "opex": "Операционные расходы",
+    "other": "Прочие / неоперационные расходы",
+    "supplier": "Оплата / аванс поставщикам",
+    "owner": "Изъятие собственника",
+    "inflow": "Приток денежных средств",
+    "outflow": "Отток денежных средств",
+}
+
+
+def breakdown(line, date_from=None, date_to=None, payment="all", module=None, basis="accrual"):
+    """Список операций, из которых сложилась строка отчёта.
+
+    basis: 'accrual' (ОПиУ, по дате операции/начислению) | 'cash' (ОДДС, по дате оплаты/оплате).
+    line:  revenue | express_revenue | deposit_revenue | cogs | opex | opex_<ARTICLE> |
+           other | supplier | owner | inflow | outflow
+    """
+    from express.models import Sale
+    from business.models import Deposit
+
+    kinds = _kinds_for_payment(payment)
+    cash = basis == "cash"
+    sale_date = "payment_date" if cash else "date"
+    sale_amt = "paid_som" if cash else "price_som"
+    exp_date = "payment_date" if cash else "date"
+    exp_amt = "paid_amount" if cash else "amount"
+    items = []
+
+    def sale_items(value_field=sale_amt):
+        qs = _by_module(Sale.objects.filter(account__kind__in=kinds), module).select_related("account")
+        for s in _between(qs, date_from, date_to, sale_date).order_by("-" + sale_date):
+            amt = getattr(s, value_field)
+            if not amt:
+                continue
+            items.append({
+                "id": f"S-{s.id}", "date": getattr(s, sale_date) or s.date,
+                "title": f"Продажа · {s.client_code}", "account": s.account.name,
+                "amount": amt, "currency": "KGS", "amount_kgs": amt,
+            })
+
+    def deposit_items(recognized):
+        qs = Deposit.objects.filter(account__module="BUSINESS")
+        qs = qs.filter(status=Deposit.Status.RECOGNIZED) if recognized else qs
+        field = "recognized_date" if recognized else "date"
+        for d in _between(_by_module(qs, module), date_from, date_to, field).select_related("account"):
+            items.append({
+                "id": f"D-{d.id}", "date": getattr(d, field) or d.date,
+                "title": f"Депозит · {d.source}", "account": d.account.name,
+                "amount": d.amount, "currency": d.currency, "amount_kgs": to_kgs(d.amount, d.currency),
+            })
+
+    def expense_items(category=None, article=None):
+        qs = _expense_qs(date_from, date_to, kinds, exp_date, category, article, module)
+        for e in qs.select_related("account").order_by("-" + exp_date):
+            amt = getattr(e, exp_amt)
+            if not amt:
+                continue
+            label = e.get_opex_article_display() if e.opex_article else e.get_category_display()
+            title = e.description or label
+            items.append({
+                "id": f"E-{e.id}", "date": getattr(e, exp_date) or e.date,
+                "title": title, "account": e.account.name,
+                "amount": amt, "currency": e.account.currency, "amount_kgs": to_kgs(amt, e.account.currency),
+            })
+
+    if line in ("revenue", "express_revenue", "inflow"):
+        sale_items()
+    if line in ("revenue", "deposit_revenue", "inflow"):
+        deposit_items(recognized=not cash)
+    if line == "cogs":
+        sale_items(value_field="cost_som")
+        expense_items(category=ExpenseCategory.COGS)
+    if line == "opex":
+        expense_items(category=ExpenseCategory.OPEX)
+    if line.startswith("opex_"):
+        expense_items(category=ExpenseCategory.OPEX, article=line.split("_", 1)[1])
+    if line in ("other", "outflow"):
+        expense_items(category=ExpenseCategory.OTHER)
+    if line in ("supplier", "outflow"):
+        expense_items(category=ExpenseCategory.SUPPLIER)
+    if line in ("owner", "outflow"):
+        expense_items(category=ExpenseCategory.OWNER)
+    if line == "outflow":
+        expense_items(category=ExpenseCategory.OPEX)
+        expense_items(category=ExpenseCategory.COGS)
+
+    items.sort(key=lambda i: str(i["date"]), reverse=True)
+    total = sum((i["amount_kgs"] for i in items), ZERO)  # точный итог по ВСЕМ операциям
+    count = len(items)
+    CAP = 500
+    return {
+        "line": line,
+        "label": BREAKDOWN_LABELS.get(line, line),
+        "basis": basis,
+        "total": total,
+        "count": count,
+        "shown": min(count, CAP),
+        "truncated": count > CAP,
+        "items": items[:CAP],
+    }

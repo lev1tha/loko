@@ -6,7 +6,14 @@ from rest_framework.views import APIView
 
 from accounts.permissions import IsAdmin
 from .models import Account, AppSettings, Expense, Transfer
-from .reports import accounts_snapshot, build_cashflow, build_pnl, business_orders, debts_summary
+from .reports import (
+    accounts_snapshot,
+    breakdown,
+    build_cashflow,
+    build_pnl,
+    business_orders,
+    debts_summary,
+)
 from .serializers import (
     AccountSerializer,
     AppSettingsSerializer,
@@ -146,3 +153,13 @@ def debts_report(request):
 def business_orders_report(request):
     date_from, date_to, _ = _period_params(request)
     return Response(business_orders(date_from, date_to))
+
+
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def breakdown_report(request):
+    date_from, date_to, payment = _period_params(request)
+    line = request.query_params.get("line", "revenue")
+    module = request.query_params.get("module") or None
+    basis = request.query_params.get("basis", "accrual")
+    return Response(breakdown(line, date_from, date_to, payment, module, basis))
