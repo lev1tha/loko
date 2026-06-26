@@ -37,7 +37,7 @@ export default function Reports() {
   return (
     <>
       <div className="card">
-        <div className="filters-grid">
+        <div className="filter-bar">
           <Field label="С даты">
             <input className="input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
           </Field>

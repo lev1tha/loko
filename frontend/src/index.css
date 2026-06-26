@@ -307,16 +307,19 @@ textarea.input { height: auto; padding: 10px 14px; resize: vertical; min-height:
 
 /* Сетка фильтров: равные колонки, аккуратный перенос (для шапок с множеством
    контролов — даты, сегменты, поля — чтобы ничего не «плавало»). */
-.filters-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
+/* Панель фильтров: контролы натуральной ширины (сегменты — по содержимому, не
+   растянуты), подписи в линию по верху, аккуратный перенос влево. */
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
   gap: var(--s-md);
-  align-items: start;
+  align-items: flex-start;
 }
-.filters-grid .field { min-width: 0; }
-/* Контролы одной высоты (40px) — подписи и поля встают в ровную линию. */
-.filters-grid .segmented {
-  width: 100%;
+.filter-bar > .field { flex: 0 0 auto; min-width: 0; }
+/* Поля ввода (даты, ставка) — фиксированная ширина; сегменты — по содержимому. */
+.filter-bar > .field:has(.input) { width: 170px; }
+.filter-bar .input { width: 100%; }
+.filter-bar .segmented {
   height: 40px;
   align-items: center;
   box-sizing: border-box;
