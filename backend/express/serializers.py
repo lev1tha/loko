@@ -79,6 +79,8 @@ class SaleSerializer(serializers.ModelSerializer):
 
         # Оплата в пределах начисления: 0 ≤ оплачено ≤ начислено (нет «переплаты»/минуса).
         paid = attrs.get("paid_som", None)
+        if paid is None and self.instance is not None:
+            paid = self.instance.paid_som
         if paid is not None:
             if paid < 0:
                 raise serializers.ValidationError({"paid_som": "Оплата не может быть отрицательной."})

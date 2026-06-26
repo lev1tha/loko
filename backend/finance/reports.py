@@ -198,18 +198,14 @@ def build_pnl(date_from=None, date_to=None, payment="all", tax_rate=None, module
     elif payment == "noncash":
         tax = (max(pre, ZERO) * noncash_rate / Decimal("100")).quantize(ZERO)
         eff_rate = noncash_rate
-    else:  # all → ставка как доля выручки по каналам, применяется к ОБЩЕЙ прибыли
-        # Так себестоимость одного канала корректно уменьшает прибыль другого
-        # (иначе налог завышался: прибыльный канал × ставку + убыточный × 0).
-        cash_rev = _pnl_base(date_from, date_to, "cash", module)["revenue"]
-        noncash_rev = _pnl_base(date_from, date_to, "noncash", module)["revenue"]
-        total_rev = cash_rev + noncash_rev
-        if total_rev > ZERO:
-            blended = (cash_rev * cash_rate + noncash_rev * noncash_rate) / total_rev
-        else:
-            blended = noncash_rate
-        tax = (max(pre, ZERO) * blended / Decimal("100")).quantize(ZERO)
-        eff_rate = blended.quantize(Decimal("0.1"))
+    else:  # all → каждый канал по своей ставке на свою прибыль до налога, затем сумма
+        # (документированное поведение Локо; межканальная атрибуция прибыли —
+        # вопрос учётной политики, решается отдельно).
+        pre_cash = _pnl_base(date_from, date_to, "cash", module)["pre_tax_profit"]
+        pre_noncash = _pnl_base(date_from, date_to, "noncash", module)["pre_tax_profit"]
+        tax = ((max(pre_cash, ZERO) * cash_rate + max(pre_noncash, ZERO) * noncash_rate)
+               / Decimal("100")).quantize(ZERO)
+        eff_rate = _pct(tax, max(pre, ZERO)) if pre > ZERO else ZERO
 
     net_profit = pre - tax
     opex, sales, revenue = base["opex"], base["sales"], base["revenue"]
@@ -627,10 +623,11 @@ def journal(date_from=None, date_to=None, module=None):
 
     def add(date_, typ, party, account, amount, currency, flow, effect, ref, mod, amount_kgs=None):
         amount = amount or ZERO
+        ak = amount if amount_kgs is None else amount_kgs
         ops.append({
             "date": date_, "type": typ, "party": party, "account": account,
             "amount": amount, "currency": currency,
-            "amount_kgs": amount if amount_kgs is None else amount_kgs,
+            "amount_kgs": (ak or ZERO).quantize(ZERO),
             "flow": flow, "effect": effect, "ref": ref, "module": mod,
         })
 

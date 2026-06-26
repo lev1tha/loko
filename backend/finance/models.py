@@ -163,6 +163,16 @@ class Account(models.Model):
     def __str__(self) -> str:
         return f"{self.name} ({self.currency})"
 
+    def save(self, *args, **kwargs):
+        # Снапшот курса для начального остатка CNY-счёта (как у операций) — иначе
+        # новый юаневый счёт считался бы 1:1 и ломал консолидацию/сверку.
+        if self.currency == Currency.CNY:
+            if self.initial_kgs_rate is None:
+                self.initial_kgs_rate = live_cny_rate()
+        else:
+            self.initial_kgs_rate = None
+        super().save(*args, **kwargs)
+
     @property
     def is_cash(self) -> bool:
         return self.kind == self.Kind.CASH
@@ -222,9 +232,9 @@ class Account(models.Model):
             total += d.kgs_value
         for e in self.expenses.all():
             total -= e.kgs_paid
-        for t in self.incoming_transfers.all():
+        for t in self.incoming_transfers.select_related("to_account", "from_account"):
             total += t.kgs_in
-        for t in self.outgoing_transfers.all():
+        for t in self.outgoing_transfers.select_related("to_account", "from_account"):
             total -= t.kgs_out
         return total
 

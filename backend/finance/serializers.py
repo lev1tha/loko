@@ -115,8 +115,12 @@ class ExpenseSerializer(serializers.ModelSerializer):
         description = attrs.get("description", getattr(self.instance, "description", ""))
 
         # Оплата в пределах начисления: 0 ≤ оплачено ≤ начислено.
+        # Берём оплату из тела ИЛИ из объекта — чтобы PATCH, снижающий только
+        # «начисление», не проскочил мимо проверки и не дал отрицательную кредиторку.
         amount = attrs.get("amount", getattr(self.instance, "amount", None))
         paid = attrs.get("paid_amount", None)
+        if paid is None and self.instance is not None:
+            paid = self.instance.paid_amount
         if paid is not None:
             if paid < 0:
                 raise serializers.ValidationError({"paid_amount": "Оплата не может быть отрицательной."})
@@ -201,10 +205,11 @@ class TransferSerializer(serializers.ModelSerializer):
             rate = Decimal("1")
         attrs["rate"] = rate
 
+        amount_or_rate_changed = "amount" in attrs or "rate" in attrs
         to_amount = attrs.get("to_amount", None)
         if to_amount in (None, ""):
-            if inst is not None:
-                # Частичное обновление без to_amount — НЕ пересчитываем (не теряем курс).
+            if inst is not None and not amount_or_rate_changed:
+                # Правка только описания и т.п. — сохраняем явно заданное зачисление.
                 attrs["to_amount"] = inst.to_amount
             elif not cross:
                 attrs["to_amount"] = amount

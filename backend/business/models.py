@@ -86,6 +86,9 @@ class Deposit(models.Model):
             account=self.account,
             category=ExpenseCategory.SUPPLIER,
             amount=self.amount,
+            # Наследуем зафиксированный курс депозита — один экономический факт
+            # (депозит → поставщик) должен считаться по одному снапшот-курсу.
+            kgs_rate=self.kgs_rate,
             description=f"Предоплата поставщику{(' ' + supplier) if supplier else ''} "
             f"(депозит #{self.pk} от {self.source})",
             date=when or self.date,
