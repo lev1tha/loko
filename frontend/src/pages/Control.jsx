@@ -74,8 +74,10 @@ function ControlBlock({ title, p, cashOnHand, receivable, payable, note }) {
   const revenue = Number(p.revenue || 0)
   const cogs = Number(p.cogs || 0)
   const opex = Number(p.operating_expenses || 0)
+  const other = Number(p.other_expenses || 0)
   const profit = Number(p.pre_tax_profit || 0)
-  const arithmeticOk = Math.abs(revenue - cogs - opex - profit) < 1
+  // Прибыль до налога = выручка − себест. − опер.расходы − прочие (как в build_pnl).
+  const arithmeticOk = Math.abs(revenue - cogs - opex - other - profit) < 1
 
   return (
     <div className="card">
@@ -91,6 +93,9 @@ function ControlBlock({ title, p, cashOnHand, receivable, payable, note }) {
             <CtrlRow label="Выручка (заработано)" value={revenue} hint="продажи + признанные приходы" />
             <CtrlRow label="Себестоимость (закуп товара)" value={cogs} sign="minus" hint="оплата поставщику за товар" />
             <CtrlRow label="Операционные расходы" value={opex} sign="minus" hint="аренда, прочее" />
+            {other !== 0 && (
+              <CtrlRow label="Прочие (неоперационные) расходы" value={other} sign="minus" hint="вне основной деятельности" />
+            )}
             <tr className="pnl-level">
               <td><strong>= Прибыль до налога</strong> <span className="caption" style={{ marginLeft: 6 }}>выручка − себест. − расходы</span></td>
               <td className={`num ${signClass(profit)}`}><strong>{money(profit)}</strong></td>

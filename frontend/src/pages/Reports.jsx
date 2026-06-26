@@ -248,6 +248,13 @@ function CashFlow({ data, onDrill }) {
             <Line label="Финансовая деятельность" value={d.net_financing} strong level />
             <Line label="Изъятие собственника" value={d.owner_withdrawals} sign="minus" indent lineKey="owner" onDrill={onDrill} />
             <Line label="Кредиты / проценты" value={d.financing_other} sign="minus" indent lineKey="financing" onDrill={onDrill} />
+            {Number(d.net_transfers || 0) !== 0 && (
+              <>
+                <Line label="Переводы и конвертации" value={d.net_transfers} strong level />
+                <Line label="Поступило переводами" value={d.transfers_in} indent />
+                <Line label="Ушло переводами" value={d.transfers_out} sign="minus" indent />
+              </>
+            )}
             <Line label="Чистое изменение денег" value={d.net_cash_flow} strong level />
             <Line label="Остаток денег на конец" value={d.closing_balance} strong level />
           </tbody>

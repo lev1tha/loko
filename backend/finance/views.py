@@ -1,3 +1,6 @@
+from decimal import Decimal, InvalidOperation
+
+from django.db.models import ProtectedError
 from rest_framework import viewsets
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
@@ -87,6 +90,17 @@ class AccountViewSet(viewsets.ModelViewSet):
             return [IsAuthenticated()]
         return [IsAdmin()]
 
+    def destroy(self, request, *args, **kwargs):
+        # Счёт с операциями защищён FK (PROTECT) — отдаём понятную 409, не 500.
+        try:
+            return super().destroy(request, *args, **kwargs)
+        except ProtectedError:
+            return Response(
+                {"detail": "Нельзя удалить счёт с операциями. Перенесите/удалите операции "
+                           "или отметьте счёт неактивным."},
+                status=409,
+            )
+
 
 class ExpenseViewSet(viewsets.ModelViewSet):
     serializer_class = ExpenseSerializer
@@ -144,8 +158,17 @@ class TransferViewSet(viewsets.ModelViewSet):
 @permission_classes([IsAuthenticated])
 def pnl_report(request):
     date_from, date_to, payment = _period_params(request)
-    tax_rate = request.query_params.get("tax_rate")
     module = request.query_params.get("module") or None
+    # Санитизируем ручную ставку налога: только неотрицательное число, иначе игнор.
+    tax_rate = request.query_params.get("tax_rate")
+    if tax_rate in ("", None):
+        tax_rate = None
+    else:
+        try:
+            if Decimal(str(tax_rate)) < 0:
+                tax_rate = None
+        except (InvalidOperation, ValueError, TypeError):
+            tax_rate = None
     return Response(build_pnl(date_from, date_to, payment, tax_rate=tax_rate, module=module))
 
 

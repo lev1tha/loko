@@ -125,8 +125,10 @@ class Command(BaseCommand):
                 },
             )
         acc_ids = [a.id for a in accounts.values()]
-        Sale.objects.filter(account_id__in=acc_ids).delete()
-        Expense.objects.filter(account_id__in=acc_ids).delete()
+        # Чистим только импортные строки (без автора). Введённое вручную через сайт
+        # (created_by задан) сохраняем — иначе переимпорт стирал бы рабочие данные.
+        Sale.objects.filter(account_id__in=acc_ids, created_by__isnull=True).delete()
+        Expense.objects.filter(account_id__in=acc_ids, created_by__isnull=True).delete()
 
         snap = dict(price_per_kg_usd=cfg.price_per_kg_usd, usd_rate_som=cfg.usd_rate_som,
                     cost_per_kg_som=cfg.base_cost_per_kg_som)

@@ -3,7 +3,7 @@ from decimal import Decimal
 from django.conf import settings as dj_settings
 from django.db import models
 
-from finance.models import Account, Currency, Expense, ExpenseCategory
+from finance.models import Account, Currency, Expense, ExpenseCategory, kgs_of, live_cny_rate
 
 
 class Deposit(models.Model):
@@ -34,6 +34,10 @@ class Deposit(models.Model):
     status = models.CharField(
         max_length=14, choices=Status.choices, default=Status.HELD, verbose_name="Статус"
     )
+    # Курс юаня, зафиксированный на момент ввода (только для CNY-счёта).
+    kgs_rate = models.DecimalField(
+        max_digits=10, decimal_places=4, null=True, blank=True, verbose_name="Курс юаня (снапшот)"
+    )
     note = models.CharField(max_length=255, blank=True, verbose_name="Комментарий")
     date = models.DateField(verbose_name="Дата")
     recognized_date = models.DateField(null=True, blank=True, verbose_name="Дата признания выручки")
@@ -51,10 +55,21 @@ class Deposit(models.Model):
         verbose_name_plural = "Депозиты"
         ordering = ("-date", "-id")
 
+    @property
+    def kgs_value(self) -> Decimal:
+        """Сумма депозита в сомах по снапшот-курсу."""
+        return kgs_of(self.amount, self.currency, self.kgs_rate)
+
     def save(self, *args, **kwargs):
         # Currency always follows the account it lands on.
         if self.account_id:
             self.currency = self.account.currency
+        # Снапшот курса юаня для CNY-депозита (история не плывёт).
+        if self.currency == Currency.CNY:
+            if self.kgs_rate is None:
+                self.kgs_rate = live_cny_rate()
+        else:
+            self.kgs_rate = None
         super().save(*args, **kwargs)
 
     def __str__(self) -> str:
@@ -100,6 +115,10 @@ class Debt(models.Model):
     status = models.CharField(
         max_length=8, choices=Status.choices, default=Status.OPEN, verbose_name="Статус"
     )
+    # Курс юаня, зафиксированный на момент ввода (только для CNY-долга).
+    kgs_rate = models.DecimalField(
+        max_digits=10, decimal_places=4, null=True, blank=True, verbose_name="Курс юаня (снапшот)"
+    )
     note = models.CharField(max_length=255, blank=True, verbose_name="Комментарий")
     date = models.DateField(verbose_name="Дата")
     created_by = models.ForeignKey(
@@ -115,6 +134,18 @@ class Debt(models.Model):
         verbose_name = "Задолженность"
         verbose_name_plural = "Задолженности"
         ordering = ("-date", "-id")
+
+    @property
+    def kgs_value(self) -> Decimal:
+        return kgs_of(self.amount, self.currency, self.kgs_rate)
+
+    def save(self, *args, **kwargs):
+        if self.currency == Currency.CNY:
+            if self.kgs_rate is None:
+                self.kgs_rate = live_cny_rate()
+        else:
+            self.kgs_rate = None
+        super().save(*args, **kwargs)
 
     def __str__(self) -> str:
         return f"{self.get_kind_display()} — {self.counterparty}: {self.amount} {self.currency}"

@@ -43,6 +43,8 @@ class DepositViewSet(viewsets.ModelViewSet):
             return Response(
                 {"detail": "Депозит уже отправлен поставщику."}, status=400
             )
+        if deposit.status == Deposit.Status.RECOGNIZED:
+            return Response({"detail": "Депозит уже признан как выручка."}, status=400)
         deposit.recognize_as_revenue(when=request.data.get("date"))
         return Response(DepositSerializer(deposit).data)
 
@@ -59,6 +61,13 @@ class DepositViewSet(viewsets.ModelViewSet):
         deposit = self.get_object()
         if deposit.status == Deposit.Status.SENT_SUPPLIER:
             return Response({"detail": "Уже отправлен поставщику."}, status=400)
+        if deposit.status == Deposit.Status.RECOGNIZED:
+            # Признанный депозит — уже выручка; отправка поставщику задвоила бы деньги
+            # (выручка пропадает, а отток создаётся). Запрещаем.
+            return Response(
+                {"detail": "Депозит уже признан как выручка — его нельзя отправить поставщику."},
+                status=400,
+            )
         deposit.send_to_supplier(
             when=request.data.get("date"), supplier=request.data.get("supplier")
         )

@@ -116,13 +116,14 @@ class Command(BaseCommand):
             )
             acc[name] = obj
 
-        # Чистим прошлые бизнес-операции (идемпотентность).
+        # Чистим прошлые ИМПОРТНЫЕ бизнес-операции (без автора), сохраняя то, что
+        # введено вручную через сайт (created_by задан) — иначе переимпорт стирал бы данные.
         biz_ids = [a.id for a in acc.values()]
-        Deposit.objects.filter(account_id__in=biz_ids).delete()
-        Expense.objects.filter(account_id__in=biz_ids).delete()
-        Transfer.objects.filter(from_account_id__in=biz_ids).delete()
-        Transfer.objects.filter(to_account_id__in=biz_ids).delete()
-        Debt.objects.all().delete()
+        Deposit.objects.filter(account_id__in=biz_ids, created_by__isnull=True).delete()
+        Expense.objects.filter(account_id__in=biz_ids, created_by__isnull=True).delete()
+        Transfer.objects.filter(from_account_id__in=biz_ids, created_by__isnull=True).delete()
+        Transfer.objects.filter(to_account_id__in=biz_ids, created_by__isnull=True).delete()
+        Debt.objects.filter(created_by__isnull=True).delete()
 
         def dt(day):
             return date(Y, 6, day)

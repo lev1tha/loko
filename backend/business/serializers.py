@@ -1,9 +1,6 @@
-from decimal import Decimal
-
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
-from finance.models import AppSettings, Currency
 from .models import Debt, Deposit
 
 
@@ -14,12 +11,8 @@ class DepositSerializer(serializers.ModelSerializer):
 
     @extend_schema_field(serializers.DecimalField(max_digits=16, decimal_places=2))
     def get_amount_kgs(self, obj):
-        # Депозит в сомах (для итогов): юань × курс, сом как есть.
-        if obj.currency == Currency.CNY:
-            if not hasattr(self, "_rate"):
-                self._rate = AppSettings.load().cny_to_kgs_rate
-            return (obj.amount * self._rate).quantize(Decimal("0.01"))
-        return obj.amount
+        # Депозит в сомах по СНАПШОТ-курсу (юань × зафиксированный курс).
+        return obj.kgs_value
 
     class Meta:
         model = Deposit
@@ -44,6 +37,25 @@ class DepositSerializer(serializers.ModelSerializer):
         if value <= 0:
             raise serializers.ValidationError("Сумма должна быть больше нуля.")
         return value
+
+    def validate_account(self, value):
+        if value is not None and value.module != "BUSINESS":
+            raise serializers.ValidationError(
+                "Депозит может зачисляться только на счёт направления Business."
+            )
+        return value
+
+    def validate(self, attrs):
+        # После признания/отправки сумму и счёт менять нельзя — иначе молча
+        # переписалась бы уже проведённая выручка и её сом-эквивалент.
+        inst = self.instance
+        if inst is not None and inst.status != Deposit.Status.HELD:
+            for f in ("amount", "account", "source", "date"):
+                if f in attrs and attrs[f] != getattr(inst, f):
+                    raise serializers.ValidationError(
+                        {f: "Нельзя менять признанный/отправленный депозит. Создайте корректирующую операцию."}
+                    )
+        return attrs
 
 
 class DebtSerializer(serializers.ModelSerializer):

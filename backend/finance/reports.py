@@ -18,20 +18,23 @@ from .models import (
     Expense,
     ExpenseCategory,
     OpexArticle,
+    kgs_of,
 )
 
 ZERO = Decimal("0.00")
+ONE = Decimal("1")
 
 
 def _rate() -> Decimal:
     return AppSettings.load().cny_to_kgs_rate
 
 
-def to_kgs(amount: Decimal, currency: str) -> Decimal:
-    amount = amount or ZERO
-    if currency == Currency.CNY:
-        return (amount * _rate()).quantize(ZERO)
-    return amount
+def to_kgs(amount: Decimal, currency: str, rate: Decimal | None = None) -> Decimal:
+    """Перевод в сом. ``rate`` — снапшот-курс операции; если не задан, берётся
+    текущий курс из Настроек (для случаев без зафиксированного курса)."""
+    if currency == Currency.CNY and rate is None:
+        rate = _rate()
+    return kgs_of(amount, currency, rate)
 
 
 def _pct(part: Decimal, whole: Decimal) -> Decimal:
@@ -83,9 +86,10 @@ def _expense_qs(date_from, date_to, kinds, field, category=None, article=None, m
 
 
 def _sum_kgs(qs, value_field):
+    """Сумма в сомах по СНАПШОТ-курсам: группируем по (валюта, курс) и переводим."""
     total = ZERO
-    for row in qs.values("account__currency").annotate(s=Sum(value_field)):
-        total += to_kgs(row["s"] or ZERO, row["account__currency"])
+    for row in qs.values("account__currency", "kgs_rate").annotate(s=Sum(value_field)):
+        total += kgs_of(row["s"] or ZERO, row["account__currency"], row["kgs_rate"])
     return total
 
 
@@ -110,8 +114,8 @@ def _recognized_deposits(date_from, date_to, kinds, module=None):
     )
     qs = _between(qs, date_from, date_to, "recognized_date")
     total = ZERO
-    for row in qs.values("currency").annotate(s=Sum("amount")):
-        total += to_kgs(row["s"] or ZERO, row["currency"])
+    for row in qs.values("currency", "kgs_rate").annotate(s=Sum("amount")):
+        total += kgs_of(row["s"] or ZERO, row["currency"], row["kgs_rate"])
     return total, qs.count()
 
 
@@ -121,8 +125,8 @@ def _deposits_received(date_from, date_to, kinds, module=None):
     qs = _by_module(Deposit.objects.filter(account__kind__in=kinds), module)
     qs = _between(qs, date_from, date_to, "date")
     total = ZERO
-    for row in qs.values("currency").annotate(s=Sum("amount")):
-        total += to_kgs(row["s"] or ZERO, row["currency"])
+    for row in qs.values("currency", "kgs_rate").annotate(s=Sum("amount")):
+        total += kgs_of(row["s"] or ZERO, row["currency"], row["kgs_rate"])
     return total, qs.count()
 
 
@@ -194,12 +198,18 @@ def build_pnl(date_from=None, date_to=None, payment="all", tax_rate=None, module
     elif payment == "noncash":
         tax = (max(pre, ZERO) * noncash_rate / Decimal("100")).quantize(ZERO)
         eff_rate = noncash_rate
-    else:  # all → каждый канал по своей ставке, затем сумма
-        pre_cash = _pnl_base(date_from, date_to, "cash", module)["pre_tax_profit"]
-        pre_noncash = _pnl_base(date_from, date_to, "noncash", module)["pre_tax_profit"]
-        tax = ((max(pre_cash, ZERO) * cash_rate + max(pre_noncash, ZERO) * noncash_rate)
-               / Decimal("100")).quantize(ZERO)
-        eff_rate = _pct(tax, max(pre, ZERO)) if pre > ZERO else ZERO
+    else:  # all → ставка как доля выручки по каналам, применяется к ОБЩЕЙ прибыли
+        # Так себестоимость одного канала корректно уменьшает прибыль другого
+        # (иначе налог завышался: прибыльный канал × ставку + убыточный × 0).
+        cash_rev = _pnl_base(date_from, date_to, "cash", module)["revenue"]
+        noncash_rev = _pnl_base(date_from, date_to, "noncash", module)["revenue"]
+        total_rev = cash_rev + noncash_rev
+        if total_rev > ZERO:
+            blended = (cash_rev * cash_rate + noncash_rev * noncash_rate) / total_rev
+        else:
+            blended = noncash_rate
+        tax = (max(pre, ZERO) * blended / Decimal("100")).quantize(ZERO)
+        eff_rate = blended.quantize(Decimal("0.1"))
 
     net_profit = pre - tax
     opex, sales, revenue = base["opex"], base["sales"], base["revenue"]
@@ -236,11 +246,14 @@ def build_pnl(date_from=None, date_to=None, payment="all", tax_rate=None, module
 # ===========================================================================
 # Cash helpers for opening / closing balances (consolidated KGS)
 # ===========================================================================
-def _consolidated_cash(upper_date, inclusive, module=None):
+def _consolidated_cash(upper_date, inclusive, module=None, kinds=None):
     """Consolidated KGS cash counting flows up to a boundary date.
 
     inclusive=True → flows with date <= upper_date (closing).
     inclusive=False → flows with date <  upper_date (opening).
+    ``kinds`` — фильтр по типу счёта (нал/безнал), чтобы при выборе канала
+    оплаты в ОДДС opening/closing считались по тем же счетам, что и потоки.
+    Каждая CNY-компонента переводится в сом по своему снапшот-курсу.
     """
     op = "lte" if inclusive else "lt"
 
@@ -250,16 +263,54 @@ def _consolidated_cash(upper_date, inclusive, module=None):
         return qs.filter(**{f"{field}__{op}": upper_date})
 
     total = ZERO
-    accounts = Account.objects.filter(module=module) if module else Account.objects.all()
+    accounts = Account.objects.all()
+    if module:
+        accounts = accounts.filter(module=module)
+    if kinds:
+        accounts = accounts.filter(kind__in=kinds)
     for acc in accounts:
-        bal = acc.initial_balance
-        bal += filt(acc.sales, "payment_date").aggregate(s=Sum("paid_som"))["s"] or ZERO
-        bal += filt(acc.deposits, "date").aggregate(s=Sum("amount"))["s"] or ZERO
-        bal -= filt(acc.expenses, "payment_date").aggregate(s=Sum("paid_amount"))["s"] or ZERO
-        bal += filt(acc.incoming_transfers, "date").aggregate(s=Sum("to_amount"))["s"] or ZERO
-        bal -= filt(acc.outgoing_transfers, "date").aggregate(s=Sum("amount"))["s"] or ZERO
-        total += to_kgs(bal, acc.currency)
+        cny = acc.currency == Currency.CNY
+        total += acc.initial_balance * (acc.initial_kgs_rate or ONE) if cny else acc.initial_balance
+        # Продажи (Express) всегда в сомах.
+        total += filt(acc.sales, "payment_date").aggregate(s=Sum("paid_som"))["s"] or ZERO
+        # Депозиты и расходы — по снапшот-курсу (группировка по курсу).
+        for g in filt(acc.deposits, "date").values("currency", "kgs_rate").annotate(s=Sum("amount")):
+            total += kgs_of(g["s"] or ZERO, g["currency"], g["kgs_rate"])
+        for g in (
+            filt(acc.expenses, "payment_date")
+            .values("account__currency", "kgs_rate")
+            .annotate(s=Sum("paid_amount"))
+        ):
+            total -= kgs_of(g["s"] or ZERO, g["account__currency"], g["kgs_rate"])
+        # Переводы: каждая нога по снапшот-курсу своей стороны (kgs_in/kgs_out).
+        for t in filt(acc.incoming_transfers, "date").select_related("to_account", "from_account"):
+            total += t.kgs_in
+        for t in filt(acc.outgoing_transfers, "date").select_related("to_account", "from_account"):
+            total -= t.kgs_out
     return total
+
+
+def _transfer_flows(date_from, date_to, module, kinds):
+    """Притоки/оттоки от переводов и конвертаций для счетов выбранного среза
+    (направление + тип счёта), в сомах по снапшот-курсам ног перевода."""
+    from .models import Transfer
+
+    accs = Account.objects.all()
+    if module:
+        accs = accs.filter(module=module)
+    if kinds:
+        accs = accs.filter(kind__in=kinds)
+    acc_ids = set(accs.values_list("id", flat=True))
+    tin = tout = ZERO
+    trs = _between(
+        Transfer.objects.select_related("from_account", "to_account"), date_from, date_to, "date"
+    )
+    for t in trs:
+        if t.to_account_id in acc_ids:
+            tin += t.kgs_in
+        if t.from_account_id in acc_ids:
+            tout += t.kgs_out
+    return tin, tout
 
 
 # ===========================================================================
@@ -290,11 +341,16 @@ def build_cashflow(date_from=None, date_to=None, payment="all", module=None):
     # Финансовая деятельность (изъятие собственника + кредиты/проценты)
     financing_outflow = owner + financing_exp
     net_financing = -financing_outflow
+    # Переводы/конвертации внутри выбранного среза — нужны, чтобы ОДДС сходился
+    # (opening + net = closing): перемещения меняют остаток счёта/канала, а на
+    # уровне «всё» дают курсовую разницу обменов. Считаем по снапшот-курсам ног.
+    transfers_in, transfers_out = _transfer_flows(date_from, date_to, module, kinds)
+    net_transfers = transfers_in - transfers_out
     total_outflow = operating_outflow + investing_outflow + financing_outflow
-    net_cash_flow = net_operating + net_investing + net_financing
+    net_cash_flow = net_operating + net_investing + net_financing + net_transfers
 
-    opening = _consolidated_cash(date_from, inclusive=False, module=module)
-    closing = _consolidated_cash(date_to, inclusive=True, module=module)
+    opening = _consolidated_cash(date_from, inclusive=False, module=module, kinds=kinds)
+    closing = _consolidated_cash(date_to, inclusive=True, module=module, kinds=kinds)
 
     expense_count = opex_cnt + cogs_cnt + sup_cnt + other_cnt + owner_cnt + inv_cnt + fin_cnt
 
@@ -318,6 +374,9 @@ def build_cashflow(date_from=None, date_to=None, payment="all", module=None):
         "financing_other": financing_exp,
         "financing_outflow": financing_outflow,
         "net_financing": net_financing,
+        "transfers_in": transfers_in,
+        "transfers_out": transfers_out,
+        "net_transfers": net_transfers,
         "total_outflow": total_outflow,
         "net_cash_flow": net_cash_flow,
         "closing_balance": closing,
@@ -334,10 +393,21 @@ def _payment_breakdown(date_from, date_to, module=None):
         sales_in = _between(acc.sales.all(), date_from, date_to, "payment_date")
         dep_in = _between(acc.deposits.all(), date_from, date_to, "date")
         exp_out = _between(acc.expenses.all(), date_from, date_to, "payment_date")
-        income = (sales_in.aggregate(s=Sum("paid_som"))["s"] or ZERO) + (
-            dep_in.aggregate(s=Sum("amount"))["s"] or ZERO
-        )
+        sales_paid = sales_in.aggregate(s=Sum("paid_som"))["s"] or ZERO
+        dep_native = dep_in.aggregate(s=Sum("amount"))["s"] or ZERO
+        income = sales_paid + dep_native        # в валюте счёта (для отображения)
         expense = exp_out.aggregate(s=Sum("paid_amount"))["s"] or ZERO
+        # Сомовые эквиваленты — по снапшот-курсам (продажи всегда в сомах).
+        income_kgs = sales_paid + sum(
+            (kgs_of(g["s"] or ZERO, g["currency"], g["kgs_rate"])
+             for g in dep_in.values("currency", "kgs_rate").annotate(s=Sum("amount"))),
+            ZERO,
+        )
+        expense_kgs = sum(
+            (kgs_of(g["s"] or ZERO, g["account__currency"], g["kgs_rate"])
+             for g in exp_out.values("account__currency", "kgs_rate").annotate(s=Sum("paid_amount"))),
+            ZERO,
+        )
         income_cnt = sales_in.count() + dep_in.count()
         expense_cnt = exp_out.count()
         if income or expense or income_cnt or expense_cnt:
@@ -348,8 +418,8 @@ def _payment_breakdown(date_from, date_to, module=None):
                     "kind": acc.kind,
                     "income": income,
                     "expense": expense,
-                    "income_kgs": to_kgs(income, acc.currency),
-                    "expense_kgs": to_kgs(expense, acc.currency),
+                    "income_kgs": income_kgs,
+                    "expense_kgs": expense_kgs,
                     "income_count": income_cnt,
                     "expense_count": expense_cnt,
                 }
@@ -381,7 +451,7 @@ def accounts_snapshot(module=None):
                 "transfers_in": acc.transfers_in_total(),
                 "transfers_out": acc.transfers_out_total(),
                 "current_balance": bal,
-                "current_balance_kgs": to_kgs(bal, acc.currency),
+                "current_balance_kgs": acc.balance_kgs,
             }
         )
     return result
@@ -396,26 +466,38 @@ def debts_summary():
     for kind in Debt.Kind:
         rows = (
             Debt.objects.filter(kind=kind.value, status=Debt.Status.OPEN)
-            .values("currency")
+            .values("currency", "kgs_rate")
             .annotate(s=Sum("amount"))
         )
-        biz[kind.value] = sum((to_kgs(r["s"] or ZERO, r["currency"]) for r in rows), ZERO)
+        biz[kind.value] = sum((kgs_of(r["s"] or ZERO, r["currency"], r["kgs_rate"]) for r in rows), ZERO)
 
-    # Express receivable = неоплаченная часть продаж (начисление − оплата).
-    s = Sale.objects.aggregate(a=Sum("price_som"), p=Sum("paid_som"))
+    # Express receivable = неоплаченная часть продаж Express (начисление − оплата).
+    s = Sale.objects.filter(account__module="EXPRESS").aggregate(a=Sum("price_som"), p=Sum("paid_som"))
     express_receivable = (s["a"] or ZERO) - (s["p"] or ZERO)
-    e = Expense.objects.values("account__currency").annotate(a=Sum("amount"), p=Sum("paid_amount"))
-    express_payable = ZERO
-    for row in e:
-        express_payable += to_kgs((row["a"] or ZERO) - (row["p"] or ZERO), row["account__currency"])
 
-    payable = biz.get(Debt.Kind.PAYABLE, ZERO) + express_payable
+    # Кредиторка по расходам — РАЗДЕЛЬНО по направлению (не валим всё в Express).
+    def _exp_payable(mod):
+        rows = (
+            Expense.objects.filter(account__module=mod)
+            .values("account__currency", "kgs_rate")
+            .annotate(a=Sum("amount"), p=Sum("paid_amount"))
+        )
+        return sum(
+            (kgs_of((r["a"] or ZERO) - (r["p"] or ZERO), r["account__currency"], r["kgs_rate"]) for r in rows),
+            ZERO,
+        )
+
+    express_payable = _exp_payable("EXPRESS")
+    business_exp_payable = _exp_payable("BUSINESS")
+
+    business_payable = biz.get(Debt.Kind.PAYABLE, ZERO) + business_exp_payable
+    payable = business_payable + express_payable
     receivable = biz.get(Debt.Kind.RECEIVABLE, ZERO) + express_receivable
     return {
         "payable": payable,
         "receivable": receivable,
         "net": receivable - payable,
-        "business_payable": biz.get(Debt.Kind.PAYABLE, ZERO),
+        "business_payable": business_payable,
         "business_receivable": biz.get(Debt.Kind.RECEIVABLE, ZERO),
         "express_receivable": express_receivable,
         "express_payable": express_payable,
@@ -464,35 +546,35 @@ def business_orders(date_from=None, date_to=None):
             "cost": ZERO, "details": [],
         })
 
-    def add_detail(c, date_, typ, amount, currency, ref):
+    def add_detail(c, date_, typ, amount, currency, ref, amount_kgs):
         slot(c)["details"].append({
             "date": date_, "type": typ, "amount": amount,
-            "amount_kgs": to_kgs(amount, currency), "currency": currency, "ref": ref,
+            "amount_kgs": amount_kgs, "currency": currency, "ref": ref,
         })
 
     dep = Deposit.objects.filter(account__module="BUSINESS").select_related("account")
     for d in _between(dep.filter(status=Deposit.Status.RECOGNIZED), date_from, date_to, "recognized_date"):
         c = _norm_client(d.source)
-        slot(c)["revenue"] += to_kgs(d.amount, d.currency)
-        add_detail(c, d.recognized_date or d.date, "Выручка (приход)", d.amount, d.currency, f"D-{d.id}")
+        slot(c)["revenue"] += d.kgs_value
+        add_detail(c, d.recognized_date or d.date, "Выручка (приход)", d.amount, d.currency, f"D-{d.id}", d.kgs_value)
     for d in _between(dep.filter(status=Deposit.Status.HELD), date_from, date_to, "date"):
         if str(d.source or "").startswith("Погашение"):
             continue
         c = _norm_client(d.source)
-        slot(c)["advance"] += to_kgs(d.amount, d.currency)
-        add_detail(c, d.date, "Аванс клиента", d.amount, d.currency, f"D-{d.id}")
+        slot(c)["advance"] += d.kgs_value
+        add_detail(c, d.date, "Аванс клиента", d.amount, d.currency, f"D-{d.id}", d.kgs_value)
 
     exp = Expense.objects.filter(account__module="BUSINESS").select_related("account")
     for e in _between(exp.filter(category=ExpenseCategory.COGS), date_from, date_to, "date"):
         c = _norm_client(e.description)
-        slot(c)["cost"] += to_kgs(e.amount, e.account.currency)
-        add_detail(c, e.date, "Закуп (себестоимость)", e.amount, e.account.currency, f"E-{e.id}")
+        slot(c)["cost"] += e.kgs_amount
+        add_detail(c, e.date, "Закуп (себестоимость)", e.amount, e.account.currency, f"E-{e.id}", e.kgs_amount)
     for e in _between(exp.filter(category=ExpenseCategory.SUPPLIER), date_from, date_to, "date"):
         c = _norm_client(e.description)
         if c == "—":
             continue
-        slot(c)["advance_supplier"] += to_kgs(e.amount, e.account.currency)
-        add_detail(c, e.date, "Аванс поставщику", e.amount, e.account.currency, f"E-{e.id}")
+        slot(c)["advance_supplier"] += e.kgs_amount
+        add_detail(c, e.date, "Аванс поставщику", e.amount, e.account.currency, f"E-{e.id}", e.kgs_amount)
 
     orders = []
     for c, v in agg.items():
@@ -541,18 +623,14 @@ def journal(date_from=None, date_to=None, module=None):
     from .models import Transfer
 
     want = lambda m: module is None or module == m
-    rate = _rate()  # курс юаня — берём один раз, без запроса к БД на каждую операцию
     ops = []
 
-    def _kgs(amount, currency):
-        amount = amount or ZERO
-        return (amount * rate).quantize(ZERO) if currency == Currency.CNY else amount
-
-    def add(date_, typ, party, account, amount, currency, flow, effect, ref, mod):
+    def add(date_, typ, party, account, amount, currency, flow, effect, ref, mod, amount_kgs=None):
         amount = amount or ZERO
         ops.append({
             "date": date_, "type": typ, "party": party, "account": account,
-            "amount": amount, "currency": currency, "amount_kgs": _kgs(amount, currency),
+            "amount": amount, "currency": currency,
+            "amount_kgs": amount if amount_kgs is None else amount_kgs,
             "flow": flow, "effect": effect, "ref": ref, "module": mod,
         })
 
@@ -566,15 +644,15 @@ def journal(date_from=None, date_to=None, module=None):
                 add(s.date, "Себестоимость карго", s.client_code, s.account.name, s.cost_som, "KGS", "out", "Себестоимость", f"SC-{s.id}", "EXPRESS")
 
     # Депозиты Business: признанная выручка — по дате признания (как build_pnl),
-    # авансы и погашения — по дате получения.
+    # авансы и погашения — по дате получения. Сумма в сомах — по снапшот-курсу.
     if want("BUSINESS"):
         dep = Deposit.objects.filter(account__module="BUSINESS").select_related("account")
         for d in _between(dep.filter(status=Deposit.Status.RECOGNIZED), date_from, date_to, "recognized_date"):
-            add(d.recognized_date or d.date, "Приход клиента", _norm_client(d.source), d.account.name, d.amount, d.currency, "in", "Выручка", f"D-{d.id}", "BUSINESS")
+            add(d.recognized_date or d.date, "Приход клиента", _norm_client(d.source), d.account.name, d.amount, d.currency, "in", "Выручка", f"D-{d.id}", "BUSINESS", d.kgs_value)
         for d in _between(dep.exclude(status=Deposit.Status.RECOGNIZED), date_from, date_to, "date"):
             src = str(d.source or "")
             typ, effect = ("Погашение долга", "Не влияет на прибыль") if src.startswith("Погашение") else ("Аванс клиента", "Аванс (не выручка)")
-            add(d.date, typ, _norm_client(d.source), d.account.name, d.amount, d.currency, "in", effect, f"D-{d.id}", "BUSINESS")
+            add(d.date, typ, _norm_client(d.source), d.account.name, d.amount, d.currency, "in", effect, f"D-{d.id}", "BUSINESS", d.kgs_value)
 
     # Расходы (по направлению): закуп / опер / аванс поставщику / изъятие / прочее
     EXP_MAP = {
@@ -591,7 +669,7 @@ def journal(date_from=None, date_to=None, module=None):
         exp = exp.filter(account__module=module)
     for e in _between(exp, date_from, date_to, "date"):
         typ, effect = EXP_MAP.get(e.category, ("Расход", "Прочее"))
-        add(e.date, typ, e.description or typ, e.account.name, e.amount, e.account.currency, "out", effect, f"E-{e.id}", e.account.module)
+        add(e.date, typ, e.description or typ, e.account.name, e.amount, e.account.currency, "out", effect, f"E-{e.id}", e.account.module, e.kgs_amount)
 
     # Переводы и конвертации (Business)
     if want("BUSINESS"):
@@ -599,7 +677,7 @@ def journal(date_from=None, date_to=None, module=None):
         for t in _between(tr, date_from, date_to, "date"):
             typ = "Покупка юаня (обмен)" if t.is_conversion else "Внутренний перевод"
             party = f"{t.from_account.name} → {t.to_account.name}"
-            add(t.date, typ, party, t.from_account.name, t.amount, t.from_account.currency, "move", "Перемещение", f"T-{t.id}", "BUSINESS")
+            add(t.date, typ, party, t.from_account.name, t.amount, t.from_account.currency, "move", "Перемещение", f"T-{t.id}", "BUSINESS", t.kgs_out)
 
     ops.sort(key=lambda o: (str(o["date"]), o["ref"]), reverse=True)
 
@@ -609,12 +687,14 @@ def journal(date_from=None, date_to=None, module=None):
     revenue = by_effect("Выручка")
     cogs = by_effect("Себестоимость")
     opex = by_effect("Опер. расход")
+    other = by_effect("Прочее")  # неоперационные расходы — тоже уменьшают прибыль (как в build_pnl)
     count = len(ops)
     totals = {
         "revenue": revenue,
         "cogs": cogs,
         "opex": opex,
-        "pre_tax_profit": revenue - cogs - opex,
+        "other_expenses": other,
+        "pre_tax_profit": revenue - cogs - opex - other,
         # справочно — не влияют на прибыль
         "advance_client": by_effect("Аванс (не выручка)"),
         "advance_supplier": by_effect("Аванс (не расход)"),
@@ -688,7 +768,7 @@ def breakdown(line, date_from=None, date_to=None, payment="all", module=None, ba
             items.append({
                 "id": f"D-{d.id}", "date": getattr(d, field) or d.date,
                 "title": f"Депозит · {d.source}", "account": d.account.name,
-                "amount": d.amount, "currency": d.currency, "amount_kgs": to_kgs(d.amount, d.currency),
+                "amount": d.amount, "currency": d.currency, "amount_kgs": d.kgs_value,
             })
 
     def expense_items(category=None, article=None):
@@ -702,7 +782,8 @@ def breakdown(line, date_from=None, date_to=None, payment="all", module=None, ba
             items.append({
                 "id": f"E-{e.id}", "date": getattr(e, exp_date) or e.date,
                 "title": title, "account": e.account.name,
-                "amount": amt, "currency": e.account.currency, "amount_kgs": to_kgs(amt, e.account.currency),
+                "amount": amt, "currency": e.account.currency,
+                "amount_kgs": kgs_of(amt, e.account.currency, e.kgs_rate),
             })
 
     if line in ("revenue", "express_revenue", "inflow"):
@@ -710,7 +791,10 @@ def breakdown(line, date_from=None, date_to=None, payment="all", module=None, ba
     if line in ("revenue", "deposit_revenue", "inflow"):
         deposit_items(recognized=not cash)
     if line == "cogs":
-        sale_items(value_field="cost_som")
+        # Себестоимость карго (Sale.cost_som) — только по начислению: у неё нет даты
+        # оплаты, поэтому в кассовом разрезе ОДДС строка = только COGS-расходы.
+        if not cash:
+            sale_items(value_field="cost_som")
         expense_items(category=ExpenseCategory.COGS)
     if line == "opex":
         expense_items(category=ExpenseCategory.OPEX)

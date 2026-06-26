@@ -60,9 +60,13 @@ Backend apps: `accounts` (custom User, ADMIN/MANAGER roles, JWT), `finance` (cor
 
 - **Drill-down**: `GET /api/reports/breakdown/?line=…&basis=accrual|cash` (`reports.py::breakdown`) returns the individual operations behind any report line; the Reports UI makes lines clickable.
 
+- **Unified journal** (added 2026-06): `GET /api/reports/journal/?module=EXPRESS|BUSINESS` (`reports.py::journal`) returns ALL operations in one chronological feed (Express sales + cost, Business deposits/expenses/transfers/conversions/owner-withdrawals) with an `effect` tag (Выручка/Себестоимость/Опер. расход/Аванс/Перемещение…) plus a totals block that **reconciles to the dashboard P&L by construction** — used by the «Журнал операций» page (`Journal.jsx`) to prove how dashboard numbers were formed. Capped at 1000 rows (`_JOURNAL_CAP`); totals computed over all. Express `Sale.cost_som` is emitted as a separate «Себестоимость карго» op; recognized Business deposits use `recognized_date` (matching `build_pnl`).
+
+- **Multi-currency in lists**: `ExpenseSerializer`/`DepositSerializer` expose `amount_kgs` (+ `account_currency`) so the UI can show native-currency rows **and** correct сом totals. Pattern to reuse for any new list that sums money across CNY/KGS accounts (don't sum raw `amount` — юань + сом без конвертации was a real bug fixed this session).
+
 API docs: drf-spectacular at `/api/schema/`, `/api/docs/`, `/api/redoc/` — **auth-gated** (`SERVE_PERMISSIONS=IsAuthenticated`). Keep schema generation warning-free (annotate views with `@extend_schema`).
 
-**Frontend**: `api/client.js` (axios, attaches JWT, one-shot refresh on 401), `lib/hooks.js::useFetch`, `auth/AuthContext`. Pages map 1:1 to the sidebar groups (Express / Business / Финансы / Админ). Reports/Sales/Expenses are the richest pages.
+**Frontend**: `api/client.js` (axios, attaches JWT, one-shot refresh on 401), `lib/hooks.js::useFetch`, `auth/AuthContext`. Pages map to the sidebar groups (Общее / Express / Business / Финансы / Админ). Reports/Sales/Expenses/Journal are the richest pages. Top group (no title) holds Дашборд, **Контроль / сверка** (`/control`, `Control.jsx` — totals with «✓ сходится»), **Журнал операций** (`/journal`, `Journal.jsx`). Business group adds **Калькулятор закупа** (`/business/calculator`, `Calculator.jsx` — commission + delivery − cost, rates from AppSettings, computes client-side, saves nothing). The Dashboard shows Express and Business side by side. Money in lists is shown in the account's native currency with a сом-equivalent; the «Конвертация / Переводы» page also lists OWNER expenses («на личный кошелёк») as withdrawals.
 
 ## Source data & reconciliation
 
