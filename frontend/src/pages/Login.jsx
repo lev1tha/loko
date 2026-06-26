@@ -74,10 +74,6 @@ export default function Login() {
         <button className="btn btn-primary btn-block" disabled={loading} style={{ marginTop: 4 }}>
           {loading ? 'Вход…' : 'Войти'}
         </button>
-
-        <p className="caption text-center" style={{ marginTop: 4 }}>
-          Демо: admin / admin123 · kassir / kassir123
-        </p>
       </form>
     </div>
   )
