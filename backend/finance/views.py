@@ -212,7 +212,12 @@ def business_orders_report(request):
 
 @extend_schema(
     parameters=PERIOD_PARAMS
-    + [OpenApiParameter("module", OpenApiTypes.STR, enum=["EXPRESS", "BUSINESS"], description="Направление")],
+    + [
+        OpenApiParameter("module", OpenApiTypes.STR, enum=["EXPRESS", "BUSINESS"], description="Направление"),
+        OpenApiParameter("effect", OpenApiTypes.STR, description="Фильтр строк по эффекту (Выручка/Опер. расход/…)"),
+        OpenApiParameter("limit", OpenApiTypes.INT, description="Размер страницы (по умолч. 500, макс 2000)"),
+        OpenApiParameter("offset", OpenApiTypes.INT, description="Смещение страницы"),
+    ],
     responses=OpenApiTypes.OBJECT,
     tags=["reports"],
 )
@@ -221,7 +226,18 @@ def business_orders_report(request):
 def journal_report(request):
     date_from, date_to, _ = _period_params(request)
     module = request.query_params.get("module") or None
-    return Response(journal(date_from, date_to, module=module))
+    effect = request.query_params.get("effect") or None
+
+    def _int(name, default):
+        try:
+            return int(request.query_params.get(name, default))
+        except (TypeError, ValueError):
+            return default
+
+    return Response(journal(
+        date_from, date_to, module=module, effect_filter=effect,
+        limit=_int("limit", 500), offset=_int("offset", 0),
+    ))
 
 
 @extend_schema(

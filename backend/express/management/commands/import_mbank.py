@@ -32,6 +32,8 @@ from express.models import Sale
 DEFAULT_DIR = str(Path.home() / "Documents" / "loko-express" / "mbank")
 ACCOUNT_NAME = "МБанк"
 TWO = Decimal("0.01")
+# Наши держатели счетов — для отсева внутренних переводов между своими счетами.
+OUR_PHONES = {"996220105653", "996776904207"}  # Бектур, Каныкей
 
 # Строка операции в личной выписке: дата время Описание: ±сумма [детали…]
 PERSONAL_RE = re.compile(
@@ -101,7 +103,7 @@ class Command(BaseCommand):
         snap = dict(price_per_kg_usd=cfg.price_per_kg_usd, usd_rate_som=cfg.usd_rate_som,
                     cost_per_kg_som=cfg.base_cost_per_kg_som)
 
-        sales, expenses = [], []
+        txns = []                      # все операции: dict(date, sign, amt, text, label)
         opening_total = Decimal("0")
         closing_total = Decimal("0")
         per_file = []
@@ -116,7 +118,7 @@ class Command(BaseCommand):
                 opening_total += op
                 closing_total += cl
 
-                n_in = n_out = 0
+                n = 0
                 if is_corp:
                     for pg in pdf.pages:
                         for tbl in (pg.extract_tables() or []):
@@ -128,26 +130,61 @@ class Command(BaseCommand):
                                 if not d:
                                     continue
                                 dt, kt = parse_num(c[3]), parse_num(c[4])
+                                text = (c[5] + " " + c[2]).strip()
                                 name = c[2].split(", ИНН")[0].strip()
                                 label = (c[5].strip() + (" — " + name if name else "")).strip(" —")
                                 if kt and kt > 0:
-                                    sales.append(self._sale(acc, kt, d, label, snap)); n_in += 1
+                                    txns.append(dict(date=d, sign="+", amt=kt, text=text, label=label)); n += 1
                                 if dt and dt > 0:
-                                    expenses.append(self._exp(acc, dt, d, label)); n_out += 1
+                                    txns.append(dict(date=d, sign="-", amt=dt, text=text, label=label)); n += 1
                 else:
                     for m in PERSONAL_RE.finditer(full):
                         ds, desc, sign, amt, detail = m.groups()
                         v, d = parse_num(amt), parse_date(ds)
                         if v is None or d is None or v == 0:
                             continue
-                        cp = counterparty(desc + " " + detail)
+                        text = re.sub(r"\s+", " ", desc + " " + detail).strip()
+                        cp = counterparty(text)
                         label = (desc.strip() + (" — " + cp if cp else "")).strip()
-                        if sign == "+":
-                            sales.append(self._sale(acc, v, d, label, snap)); n_in += 1
-                        else:
-                            expenses.append(self._exp(acc, v, d, label)); n_out += 1
+                        txns.append(dict(date=d, sign=sign, amt=v, text=text, label=label)); n += 1
 
-                per_file.append((f.name, "корп" if is_corp else "личн", op, cl, n_in, n_out))
+                per_file.append((f.name, "корп" if is_corp else "личн", op, cl, n))
+
+        # --- Отсев внутренних переводов между своими счетами (убираем задвоение выручки) ---
+        # 1) Обнал (Тез→Бектур): строки с меткой «обналичование» — обе ноги равны (нетто 0).
+        # 2) Сметания Бектур↔Каныкей: пара расход↔приход с НАШИМИ телефонами, равная сумма, ≤3 дней.
+        # Только спаренные/сбалансированные строки — баланс счёта не меняется.
+        internal = set()
+        for t in txns:
+            if "обналич" in t["text"].lower():
+                internal.add(id(t))
+
+        def our_phone(text):
+            m = re.search(r"(996\d{9})", text)
+            return bool(m and m.group(1) in OUR_PHONES)
+
+        used = set()
+        deb = sorted([t for t in txns if t["sign"] == "-" and id(t) not in internal and our_phone(t["text"])],
+                     key=lambda r: -r["amt"])
+        cred = [t for t in txns if t["sign"] == "+" and id(t) not in internal and our_phone(t["text"])]
+        for d in deb:
+            for c in cred:
+                if id(c) in used:
+                    continue
+                if c["amt"] == d["amt"] and abs((c["date"] - d["date"]).days) <= 3:
+                    internal.add(id(d)); internal.add(id(c)); used.add(id(c)); break
+
+        n_internal = len(internal)
+        internal_sum = sum((t["amt"] for t in txns if t["sign"] == "+" and id(t) in internal), Decimal("0"))
+
+        sales, expenses = [], []
+        for t in txns:
+            if id(t) in internal:
+                continue
+            if t["sign"] == "+":
+                sales.append(self._sale(acc, t["amt"], t["date"], t["label"], snap))
+            else:
+                expenses.append(self._exp(acc, t["amt"], t["date"], t["label"]))
 
         # Входящий остаток счёта = сумма входящих по выпискам → консолидир. баланс сойдётся.
         acc.initial_balance = opening_total
@@ -161,12 +198,13 @@ class Command(BaseCommand):
         balance = opening_total + rev - exp
 
         self.stdout.write("Файлы:")
-        for name, kind, op, cl, ni, no in per_file:
-            self.stdout.write(f"  [{kind}] {name}: вход {op:,.2f} → выход {cl:,.2f} | +{ni} −{no}")
+        for name, kind, op, cl, n in per_file:
+            self.stdout.write(f"  [{kind}] {name}: вход {op:,.2f} → выход {cl:,.2f} | строк {n}")
         self.stdout.write(self.style.SUCCESS(
             f"\n✔ Счёт «{ACCOUNT_NAME}»: продаж {len(sales)} на {rev:,.2f}; расходов {len(expenses)} на {exp:,.2f}"
         ))
         self.stdout.write(
+            f"  Внутренних отсеяно: {n_internal} строк (обнал+сметания) на {internal_sum:,.2f} с каждой стороны\n"
             f"  Входящий остаток (сумма): {opening_total:,.2f}\n"
             f"  Расчётный баланс: {opening_total:,.2f} + {rev:,.2f} − {exp:,.2f} = {balance:,.2f}\n"
             f"  Сумма исходящих по выпискам: {closing_total:,.2f}"

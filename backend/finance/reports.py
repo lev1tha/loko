@@ -603,10 +603,11 @@ def business_orders(date_from=None, date_to=None):
 # ===========================================================================
 # Журнал ВСЕХ операций (Express + Business) — «как сложились цифры» (доказательство)
 # ===========================================================================
-_JOURNAL_CAP = 1000  # максимум строк в выдаче; итоги считаются по ВСЕМ операциям
+_JOURNAL_PAGE = 500   # размер страницы по умолчанию
+_JOURNAL_MAX = 2000   # максимум строк за один запрос (защита); итоги — по ВСЕМ операциям
 
 
-def journal(date_from=None, date_to=None, module=None):
+def journal(date_from=None, date_to=None, module=None, effect_filter=None, limit=None, offset=0):
     """Единый хронологический журнал всех операций с фильтром по направлению:
       * Express — продажи (Sale) + расходы карго (Expense).
       * Business — приходы/авансы/погашения (Deposit), закуп/аванс/изъятие/прочее
@@ -668,13 +669,14 @@ def journal(date_from=None, date_to=None, module=None):
         typ, effect = EXP_MAP.get(e.category, ("Расход", "Прочее"))
         add(e.date, typ, e.description or typ, e.account.name, e.amount, e.account.currency, "out", effect, f"E-{e.id}", e.account.module, e.kgs_amount)
 
-    # Переводы и конвертации (Business)
-    if want("BUSINESS"):
-        tr = Transfer.objects.filter(from_account__module="BUSINESS").select_related("from_account", "to_account")
-        for t in _between(tr, date_from, date_to, "date"):
-            typ = "Покупка юаня (обмен)" if t.is_conversion else "Внутренний перевод"
-            party = f"{t.from_account.name} → {t.to_account.name}"
-            add(t.date, typ, party, t.from_account.name, t.amount, t.from_account.currency, "move", "Перемещение", f"T-{t.id}", "BUSINESS", t.kgs_out)
+    # Переводы и конвертации (по направлению счёта-источника)
+    tr = Transfer.objects.select_related("from_account", "to_account")
+    if module:
+        tr = tr.filter(from_account__module=module)
+    for t in _between(tr, date_from, date_to, "date"):
+        typ = "Покупка юаня (обмен)" if t.is_conversion else "Внутренний перевод"
+        party = f"{t.from_account.name} → {t.to_account.name}"
+        add(t.date, typ, party, t.from_account.name, t.amount, t.from_account.currency, "move", "Перемещение", f"T-{t.id}", t.from_account.module, t.kgs_out)
 
     ops.sort(key=lambda o: (str(o["date"]), o["ref"]), reverse=True)
 
@@ -685,7 +687,7 @@ def journal(date_from=None, date_to=None, module=None):
     cogs = by_effect("Себестоимость")
     opex = by_effect("Опер. расход")
     other = by_effect("Прочее")  # неоперационные расходы — тоже уменьшают прибыль (как в build_pnl)
-    count = len(ops)
+    total_count = len(ops)
     totals = {
         "revenue": revenue,
         "cogs": cogs,
@@ -697,13 +699,25 @@ def journal(date_from=None, date_to=None, module=None):
         "advance_supplier": by_effect("Аванс (не расход)"),
         "owner": by_effect("Вывод (не расход)"),
         "repayment": by_effect("Не влияет на прибыль"),
-        "count": count,
+        "count": total_count,
     }
+
+    # Фильтр таблицы по «эффекту» (клик по плитке) + пагинация. Плитки-итоги выше —
+    # всегда по ВСЕМ операциям периода и от страницы/фильтра не зависят.
+    rows = [o for o in ops if o["effect"] == effect_filter] if effect_filter else ops
+    count = len(rows)
+    filtered_sum = sum((o["amount_kgs"] for o in rows), ZERO)
+    page_size = _JOURNAL_PAGE if limit is None else max(1, min(int(limit), _JOURNAL_MAX))
+    offset = max(0, int(offset or 0))
+    page = rows[offset:offset + page_size]
     return {
-        "operations": ops[:_JOURNAL_CAP],
-        "count": count,
-        "shown": min(count, _JOURNAL_CAP),
-        "truncated": count > _JOURNAL_CAP,
+        "operations": page,
+        "count": count,                 # строк, попавших под текущий фильтр/период
+        "total_count": total_count,     # всего операций за период (без фильтра)
+        "offset": offset,
+        "limit": page_size,
+        "shown": len(page),
+        "filtered_sum": filtered_sum.quantize(ZERO),
         "totals": totals,
     }
 

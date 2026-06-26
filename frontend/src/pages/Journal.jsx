@@ -3,6 +3,8 @@ import { useFetch } from '../lib/hooks'
 import { firstOfMonth, today, money, num, dateRu, signClass } from '../lib/format'
 import { Badge, EmptyState, Field, Segmented, Spinner, Stat } from '../components/ui'
 
+const PAGE = 500 // строк на страницу журнала
+
 const MODULES = [
   { value: 'all', label: 'Всё' },
   { value: 'EXPRESS', label: 'Express' },
@@ -39,17 +41,40 @@ export default function Journal() {
   const [from, setFrom] = useState(firstOfMonth())
   const [to, setTo] = useState(today())
   const [module, setModule] = useState('all')
-  const [filter, setFilter] = useState(null) // фильтр по «эффекту»
+  const [filter, setFilter] = useState(null) // фильтр по «эффекту» (серверный)
+  const [offset, setOffset] = useState(0)
 
-  const params = { from, to, ...(module !== 'all' ? { module } : {}) }
+  // Любая смена среза сбрасывает страницу на первую.
+  const setModuleR = (v) => { setModule(v); setFilter(null); setOffset(0) }
+  const setFromR = (v) => { setFrom(v); setOffset(0) }
+  const setToR = (v) => { setTo(v); setOffset(0) }
+  const toggleFilter = (eff) => { setFilter((f) => (f === eff ? null : eff)); setOffset(0) }
+
+  const params = {
+    from, to, limit: PAGE, offset,
+    ...(module !== 'all' ? { module } : {}),
+    ...(filter ? { effect: filter } : {}),
+  }
   const data = useFetch('/reports/journal/', params)
 
   if (data.loading) return <Spinner full />
   const d = data.data || { operations: [], totals: {} }
   const t = d.totals || {}
-  const all = d.operations || []
-  const ops = filter ? all.filter((o) => o.effect === filter) : all
-  const shownKgs = ops.reduce((acc, o) => acc + Number(o.amount_kgs || 0), 0)
+  const ops = d.operations || []
+  const count = d.count || 0
+  const periodSum = Number(d.filtered_sum || 0)
+  const start = count ? (d.offset || 0) + 1 : 0
+  const end = (d.offset || 0) + ops.length
+  const hasPrev = (d.offset || 0) > 0
+  const hasNext = end < count
+
+  const Pager = () => (count > PAGE ? (
+    <div className="row" style={{ gap: 8, alignItems: 'center', marginTop: 8 }}>
+      <button className="btn btn-ghost btn-sm" disabled={!hasPrev} onClick={() => setOffset(Math.max(0, (d.offset || 0) - PAGE))}>← Назад</button>
+      <span className="caption">стр. {Math.floor((d.offset || 0) / PAGE) + 1} из {Math.ceil(count / PAGE)}</span>
+      <button className="btn btn-ghost btn-sm" disabled={!hasNext} onClick={() => setOffset((d.offset || 0) + PAGE)}>Вперёд →</button>
+    </div>
+  ) : null)
 
   return (
     <>
@@ -61,7 +86,7 @@ export default function Journal() {
           </p>
           <div className="field" style={{ alignItems: 'flex-end' }}>
             <span className="field-label">Направление</span>
-            <Segmented value={module} onChange={(v) => { setModule(v); setFilter(null) }} options={MODULES} />
+            <Segmented value={module} onChange={setModuleR} options={MODULES} />
           </div>
         </div>
       </div>
@@ -73,7 +98,7 @@ export default function Journal() {
             key={tile.key}
             className="stat"
             style={{ cursor: 'pointer', textAlign: 'left', border: filter === tile.effect ? '1px solid var(--ink)' : undefined }}
-            onClick={() => setFilter(filter === tile.effect ? null : tile.effect)}
+            onClick={() => toggleFilter(tile.effect)}
           >
             <span className="stat-label">{tile.label} ›</span>
             <span className={`stat-value ${tile.neg ? 'neg' : ''}`}>{tile.neg ? '−' : ''}{money(t[tile.key])}</span>
@@ -91,7 +116,7 @@ export default function Journal() {
               key={tile.key}
               className="stat"
               style={{ cursor: 'pointer', textAlign: 'left', border: filter === tile.effect ? '1px solid var(--ink)' : undefined }}
-              onClick={() => setFilter(filter === tile.effect ? null : tile.effect)}
+              onClick={() => toggleFilter(tile.effect)}
             >
               <span className="stat-label">{tile.label} ›</span>
               <span className="stat-value">{money(t[tile.key])}</span>
@@ -106,19 +131,22 @@ export default function Journal() {
           <span className="card-title">Журнал операций · {filter || 'все события'}</span>
           <div className="toolbar">
             <Field label="С даты">
-              <input className="input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+              <input className="input" type="date" value={from} onChange={(e) => setFromR(e.target.value)} />
             </Field>
             <Field label="По дату">
-              <input className="input" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+              <input className="input" type="date" value={to} onChange={(e) => setToR(e.target.value)} />
             </Field>
           </div>
         </div>
 
         <div className="caption" style={{ marginBottom: 8 }}>
-          Показано {num(ops.length, 0)} {filter ? '' : `из ${num(d.count || 0, 0)} `}операций · сумма {money(shownKgs)}
-          {filter && <> · <button className="btn btn-ghost btn-sm" onClick={() => setFilter(null)}>сбросить фильтр</button></>}
-          {d.truncated && <> · загружены первые {num(d.shown, 0)} из {num(d.count, 0)} — сузьте период{filter ? ' (фильтр и сумма по загруженным, не по всем)' : ' для полного списка'}</>}
+          {count > 0
+            ? <>Показано {num(start, 0)}–{num(end, 0)} из {num(count, 0)} операций{filter ? ` · ${filter}` : ''} · сумма {money(periodSum)}</>
+            : 'Операций за период нет.'}
+          {filter && <> · <button className="btn btn-ghost btn-sm" onClick={() => toggleFilter(filter)}>сбросить фильтр</button></>}
         </div>
+
+        <Pager />
 
         {ops.length === 0 ? (
           <EmptyState>Операций за период нет.</EmptyState>
@@ -156,6 +184,9 @@ export default function Journal() {
             </table>
           </div>
         )}
+
+        <Pager />
+
         <p className="caption mt-lg" style={{ lineHeight: 1.5 }}>
           «Как влияет» показывает, куда идёт операция в отчётах: <strong>Выручка</strong> и <strong>Себестоимость</strong> формируют
           прибыль; авансы, изъятия, переводы и конвертации деньги перемещают, но прибыль не меняют.
