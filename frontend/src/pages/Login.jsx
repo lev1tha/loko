@@ -1,12 +1,12 @@
 import { useState } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate, Navigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { errorMessage } from '../api/client'
 import { Alert, Field } from '../components/ui'
 import './Login.css'
 
 export default function Login() {
-  const { login } = useAuth()
+  const { login, isAuthenticated, loading: authLoading } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const [username, setUsername] = useState('')
@@ -15,6 +15,9 @@ export default function Login() {
   const [loading, setLoading] = useState(false)
 
   const from = location.state?.from?.pathname || '/'
+
+  // Уже вошёл — не показываем форму логина, уводим в приложение.
+  if (!authLoading && isAuthenticated) return <Navigate to={from} replace />
 
   async function onSubmit(e) {
     e.preventDefault()

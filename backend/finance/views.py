@@ -3,14 +3,13 @@ from decimal import Decimal, InvalidOperation
 from django.db.models import ProtectedError
 from rest_framework import viewsets
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 
-from accounts.permissions import IsAdmin
+from accounts.permissions import DenyOperator, IsAdmin
 from .models import Account, AppSettings, Expense, Transfer
 from .reports import (
     accounts_snapshot,
@@ -53,7 +52,9 @@ class AppSettingsView(APIView):
     def get_permissions(self):
         if self.request.method in ("PUT", "PATCH"):
             return [IsAdmin()]
-        return [IsAuthenticated()]
+        # Read is open to managers/admins but blocked for the operator role
+        # (settings expose tax rates / cost price — financial parameters).
+        return [DenyOperator()]
 
     @extend_schema(responses=AppSettingsSerializer)
     def get(self, request):
@@ -87,7 +88,8 @@ class AccountViewSet(viewsets.ModelViewSet):
 
     def get_permissions(self):
         if self.action in ("list", "retrieve"):
-            return [IsAuthenticated()]
+            # Account listings carry balances → never exposed to operators.
+            return [DenyOperator()]
         return [IsAdmin()]
 
     def destroy(self, request, *args, **kwargs):
@@ -104,7 +106,7 @@ class AccountViewSet(viewsets.ModelViewSet):
 
 class ExpenseViewSet(viewsets.ModelViewSet):
     serializer_class = ExpenseSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [DenyOperator]
 
     def get_queryset(self):
         qs = Expense.objects.select_related("account").all()
@@ -130,7 +132,7 @@ class ExpenseViewSet(viewsets.ModelViewSet):
 
 class TransferViewSet(viewsets.ModelViewSet):
     serializer_class = TransferSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [DenyOperator]
 
     def get_queryset(self):
         qs = Transfer.objects.select_related("from_account", "to_account").all()
@@ -155,7 +157,7 @@ class TransferViewSet(viewsets.ModelViewSet):
     tags=["reports"],
 )
 @api_view(["GET"])
-@permission_classes([IsAuthenticated])
+@permission_classes([DenyOperator])
 def pnl_report(request):
     date_from, date_to, payment = _period_params(request)
     module = request.query_params.get("module") or None
@@ -174,7 +176,7 @@ def pnl_report(request):
 
 @extend_schema(parameters=PERIOD_PARAMS, responses=OpenApiTypes.OBJECT, tags=["reports"])
 @api_view(["GET"])
-@permission_classes([IsAuthenticated])
+@permission_classes([DenyOperator])
 def cashflow_report(request):
     date_from, date_to, payment = _period_params(request)
     module = request.query_params.get("module") or None
@@ -187,7 +189,7 @@ def cashflow_report(request):
     tags=["reports"],
 )
 @api_view(["GET"])
-@permission_classes([IsAuthenticated])
+@permission_classes([DenyOperator])
 def balances(request):
     module = request.query_params.get("module")
     return Response(accounts_snapshot(module=module))
@@ -195,14 +197,14 @@ def balances(request):
 
 @extend_schema(responses=OpenApiTypes.OBJECT, tags=["reports"])
 @api_view(["GET"])
-@permission_classes([IsAuthenticated])
+@permission_classes([DenyOperator])
 def debts_report(request):
     return Response(debts_summary())
 
 
 @extend_schema(parameters=PERIOD_PARAMS, responses=OpenApiTypes.OBJECT, tags=["reports"])
 @api_view(["GET"])
-@permission_classes([IsAuthenticated])
+@permission_classes([DenyOperator])
 def business_orders_report(request):
     date_from, date_to, _ = _period_params(request)
     return Response(business_orders(date_from, date_to))
@@ -215,7 +217,7 @@ def business_orders_report(request):
     tags=["reports"],
 )
 @api_view(["GET"])
-@permission_classes([IsAuthenticated])
+@permission_classes([DenyOperator])
 def journal_report(request):
     date_from, date_to, _ = _period_params(request)
     module = request.query_params.get("module") or None
@@ -237,7 +239,7 @@ def journal_report(request):
     tags=["reports"],
 )
 @api_view(["GET"])
-@permission_classes([IsAuthenticated])
+@permission_classes([DenyOperator])
 def breakdown_report(request):
     date_from, date_to, payment = _period_params(request)
     line = request.query_params.get("line", "revenue")

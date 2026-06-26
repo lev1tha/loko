@@ -119,6 +119,7 @@ function UserForm({ onClose, onSaved }) {
         <Field label="Роль">
           <select className="select" value={role} onChange={(e) => setRole(e.target.value)}>
             <option value="MANAGER">Кассир/Менеджер</option>
+            <option value="OPERATOR">Сотрудник (только добавление продаж)</option>
             <option value="ADMIN">Администратор</option>
           </select>
         </Field>

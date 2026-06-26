@@ -43,6 +43,8 @@ export function AuthProvider({ children }) {
     logout,
     isAuthenticated: !!user,
     isAdmin: !!user?.is_admin,
+    // «Сотрудник» — только добавление продаж Express, без доступа к финансам.
+    isOperator: user?.role === 'OPERATOR',
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

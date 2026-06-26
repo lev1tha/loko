@@ -193,6 +193,9 @@ textarea.input { height: auto; padding: 10px 14px; resize: vertical; min-height:
   margin-bottom: var(--s-md);
   flex-wrap: wrap;
 }
+/* Когда в шапке есть фильтры (.toolbar) — короткую кнопку действия выравниваем по
+   нижней кромке полей, а не по центру (иначе кнопка «висит» выше полей). */
+.card-header:has(.toolbar) { align-items: flex-end; }
 .card-title { font-size: 18px; font-weight: 600; color: var(--ink); }
 
 /* ===== Badges ===== */
@@ -278,6 +281,9 @@ textarea.input { height: auto; padding: 10px 14px; resize: vertical; min-height:
 .row:has(> .field) { align-items: flex-start; }
 .col { display: flex; flex-direction: column; gap: var(--s-md); }
 .spread { display: flex; align-items: center; justify-content: space-between; gap: var(--s-md); }
+/* Если в spread есть фильтр-контрол (.field) — прижимаем по нижней кромке, чтобы
+   переключатель был на одной линии с соседним текстом/итогом. */
+.spread:has(> .field) { align-items: flex-end; }
 .grow { flex: 1; }
 .gap-sm { gap: var(--s-sm); }
 .mt-lg { margin-top: var(--s-lg); }
@@ -298,6 +304,35 @@ textarea.input { height: auto; padding: 10px 14px; resize: vertical; min-height:
   align-items: flex-end;
 }
 .toolbar .field { min-width: 150px; flex: 1 1 auto; }
+
+/* Сетка фильтров: равные колонки, аккуратный перенос (для шапок с множеством
+   контролов — даты, сегменты, поля — чтобы ничего не «плавало»). */
+.filters-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
+  gap: var(--s-md);
+  align-items: start;
+}
+.filters-grid .field { min-width: 0; }
+/* Контролы одной высоты (40px) — подписи и поля встают в ровную линию. */
+.filters-grid .segmented {
+  width: 100%;
+  height: 40px;
+  align-items: center;
+  box-sizing: border-box;
+}
+
+/* Сетка формы (Настройки и т.п.): равные колонки, поля в линию даже при
+   разной длине подписей — резервируем высоту подписи под 2 строки. */
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--s-md);
+  align-items: start;
+}
+.form-grid .field { min-width: 0; }
+/* line-height фикс + резерв ровно под 2 строки → инпуты встают в одну линию. */
+.form-grid > .field > .field-label { min-height: 2.6em; line-height: 1.3; }
 
 /* ===== Inline-editable table cell ===== */
 .cell-edit { cursor: pointer; }
@@ -419,3 +454,97 @@ textarea.input { height: auto; padding: 10px 14px; resize: vertical; min-height:
 }
 .alert-error { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
 .alert-success { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+
+/* Поле «только для чтения» (расчётный вес из суммы) — видно, но не редактируется. */
+.input-readonly {
+  background: var(--surface-card);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+/* ── Роль «Сотрудник»: минимальная оболочка + форма добавления продажи ── */
+.operator-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--canvas);
+}
+.operator-topbar {
+  height: var(--topbar-h);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 clamp(16px, 4vw, 32px);
+  background: var(--canvas);
+  border-bottom: 1px solid var(--hairline);
+}
+.operator-brand { display: flex; align-items: center; gap: 10px; }
+.operator-topbar .brand-mark {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-md);
+  background: var(--primary);
+  color: var(--on-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+}
+.operator-topbar .brand-text { display: flex; flex-direction: column; line-height: 1.1; }
+.operator-topbar .brand-text strong { color: var(--ink); font-size: 15px; letter-spacing: -0.02em; }
+.operator-topbar .brand-text span { font-size: 11px; color: var(--muted); }
+.operator-user { display: flex; align-items: center; gap: 12px; }
+.operator-username { font-size: 13px; color: var(--muted); }
+
+.operator-main {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: clamp(16px, 4vw, 48px);
+}
+.operator-card { width: 100%; max-width: 520px; }
+.operator-card-head { margin-bottom: var(--s-md); }
+.operator-card-head .muted { margin: 4px 0 0; font-size: 13px; }
+
+.operator-total {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+}
+.operator-total-label { font-size: 13px; color: var(--muted); }
+.operator-total-value { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; color: var(--ink); }
+
+/* ── Состояния «фура»: загрузка и ошибка/404 ── */
+.state-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  min-height: 320px;
+  padding: 48px 24px;
+  text-align: center;
+}
+.truck-svg { width: 240px; max-width: 80%; height: auto; }
+.state-title { font-size: 22px; font-weight: 700; color: var(--ink); margin: 6px 0 0; letter-spacing: -0.02em; }
+.state-text { color: var(--muted); font-size: 15px; max-width: 420px; margin: 0; line-height: 1.5; }
+.state-action { margin-top: 8px; }
+
+/* Грустный наклон пустого грузовика. */
+.truck-svg.is-empty .truck-body { transform: rotate(-2deg); transform-box: fill-box; transform-origin: center; }
+
+/* Анимация «едет и ищет груз» (с уважением к prefers-reduced-motion). */
+@media (prefers-reduced-motion: no-preference) {
+  .truck-svg.is-driving .truck-body { animation: truck-bob 1s ease-in-out infinite; transform-box: fill-box; transform-origin: bottom center; }
+  .truck-svg.is-driving .truck-wheel { animation: wheel-spin 0.8s linear infinite; transform-box: fill-box; transform-origin: center; }
+  .truck-svg.is-driving .truck-motion line { animation: motion-dash 0.6s linear infinite; }
+  .truck-svg.is-driving .truck-motion line:nth-child(2) { animation-delay: 0.15s; }
+  .truck-svg.is-driving .truck-motion line:nth-child(3) { animation-delay: 0.3s; }
+  .truck-svg.is-driving .truck-parcel { animation: parcel-wiggle 1s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+}
+@keyframes truck-bob { 0%, 100% { transform: translateY(0) } 50% { transform: translateY(-3px) } }
+@keyframes wheel-spin { to { transform: rotate(360deg) } }
+@keyframes motion-dash { 0% { opacity: 0; transform: translateX(10px) } 40% { opacity: 1 } 100% { opacity: 0; transform: translateX(-12px) } }
+@keyframes parcel-wiggle { 0%, 100% { transform: rotate(0) } 50% { transform: rotate(4deg) } }

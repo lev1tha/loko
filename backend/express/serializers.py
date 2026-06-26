@@ -89,4 +89,46 @@ class SaleSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {"paid_som": "Оплата не может превышать сумму начисления."}
                 )
+
+        # Ручная себестоимость требует значения — иначе она тихо считается 0
+        # и маржа завышается (см. _apply_pricing).
+        if attrs.get("cost_is_manual") and attrs.get("cost_som") in (None, "") and self.instance is None:
+            raise serializers.ValidationError(
+                {"cost_som": "Укажите себестоимость при ручном вводе."}
+            )
         return attrs
+
+
+class OperatorSaleSerializer(SaleSerializer):
+    """Сериализатор для роли «Сотрудник».
+
+    Без финансовых полей (себестоимость, маржа, ставки, дебиторка) — ни в ответе,
+    ни на запись. Оператор их не видит (даже в devtools / сыром ответе на create)
+    и не может задать через тело запроса. Себестоимость всегда считается
+    динамически на бэкенде (cost_is_manual недоступен).
+    """
+
+    class Meta(SaleSerializer.Meta):
+        fields = (
+            "id",
+            "client_code",
+            "amount_mode",
+            "amount_mode_display",
+            "weight_kg",
+            "places",
+            "account",
+            "account_name",
+            "is_cash",
+            "price_som",
+            "paid_som",
+            "date",
+            "payment_date",
+            "created_at",
+        )
+        read_only_fields = ("created_at",)
+        extra_kwargs = {
+            "price_som": {"required": False},
+            "paid_som": {"required": False},
+            "payment_date": {"required": False},
+            "weight_kg": {"required": False},
+        }

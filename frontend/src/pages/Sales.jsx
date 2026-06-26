@@ -214,8 +214,25 @@ function SaleForm({ editing, accounts, onClose, onSaved }) {
   const [accountId, setAccountId] = useState(editing?.account || accounts[0]?.id || '')
   const [date, setDate] = useState(editing?.date || today())
   const [quote, setQuote] = useState(null)
+  const [perKgRate, setPerKgRate] = useState(0) // цена 1 кг (сом) — для пересчёта суммы → вес
+  const [costPerKg, setCostPerKg] = useState(0) // себестоимость 1 кг (сом) — для расчёта в «прямой сумме»
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+
+  // Ставки за 1 кг (цена и себестоимость) — для режима «прямая сумма»:
+  // вес = сумма ÷ цена-за-кг, себестоимость = вес × себест-за-кг.
+  useEffect(() => {
+    api
+      .post('/sales/quote/', { weight_kg: 1 })
+      .then((res) => {
+        setPerKgRate(Number(res.data.price_som) || 0)
+        setCostPerKg(Number(res.data.cost_per_kg_som) || 0)
+      })
+      .catch(() => {
+        setPerKgRate(0)
+        setCostPerKg(0)
+      })
+  }, [])
 
   // Live preview for WEIGHT mode (цена зависит от веса).
   useEffect(() => {
@@ -236,8 +253,13 @@ function SaleForm({ editing, accounts, onClose, onSaved }) {
   }, [weight, mode])
 
   const accrual = mode === 'WEIGHT' ? Number(quote?.price_som || 0) : Number(directAmount || 0)
+  // «Прямая сумма»: расчётный вес (только показ, не редактируется) = сумма ÷ ставка за кг.
+  const directDerivedWeight =
+    perKgRate > 0 && Number(directAmount) > 0 ? Number(directAmount) / perKgRate : 0
   // Себестоимость — динамическая, от веса по ставке из Настроек (см. AppSettings).
-  const autoCost = mode === 'WEIGHT' ? Number(quote?.cost_som || 0) : 0
+  // В «прямой сумме» — от расчётного веса (сумма ÷ цена-за-кг) × себестоимость-за-кг.
+  const autoCost =
+    mode === 'WEIGHT' ? Number(quote?.cost_som || 0) : directDerivedWeight * costPerKg
   const margin = accrual - autoCost
 
   async function submit(e) {
@@ -306,6 +328,15 @@ function SaleForm({ editing, accounts, onClose, onSaved }) {
           <div className="row row-wrap">
             <Field label="Сумма начисления, сом" hint="Вводится напрямую">
               <input className="input" type="number" step="0.01" min="0" value={directAmount} onChange={(e) => setDirectAmount(e.target.value)} placeholder="5000" required />
+            </Field>
+            <Field label="Вес (расчётный), кг" hint="Из суммы — изменить нельзя">
+              <input
+                className="input input-readonly"
+                value={directDerivedWeight > 0 ? directDerivedWeight.toFixed(3) : ''}
+                placeholder="—"
+                readOnly
+                tabIndex={-1}
+              />
             </Field>
             <Field label="Кол-во мест">
               <input className="input" type="number" min="1" value={places} onChange={(e) => setPlaces(e.target.value)} />

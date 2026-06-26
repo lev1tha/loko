@@ -1,11 +1,15 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
-import { AuthProvider } from './auth/AuthContext'
+import { AuthProvider, useAuth } from './auth/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
+import ErrorBoundary from './components/ErrorBoundary'
 import Layout from './components/Layout'
+import OperatorLayout from './components/OperatorLayout'
 import Login from './pages/Login'
+import NotFound from './pages/NotFound'
 import Dashboard from './pages/Dashboard'
 import Control from './pages/Control'
 import Sales from './pages/Sales'
+import OperatorSale from './pages/OperatorSale'
 import Expenses from './pages/Expenses'
 import Accounts from './pages/Accounts'
 import Transfers from './pages/Transfers'
@@ -22,62 +26,93 @@ export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-
-          <Route
-            element={
-              <ProtectedRoute>
-                <Layout />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<Dashboard />} />
-            <Route path="control" element={<Control />} />
-            <Route path="journal" element={<Journal />} />
-
-            {/* Loko Express */}
-            <Route path="sales" element={<Sales />} />
-            <Route path="express/accounts" element={<Accounts module="EXPRESS" />} />
-
-            {/* Loko Business */}
-            <Route path="business/accounts" element={<Accounts module="BUSINESS" />} />
-            <Route path="business/orders" element={<BusinessOrders />} />
-            <Route path="business/transfers" element={<Transfers module="BUSINESS" />} />
-            <Route path="business/deposits" element={<Deposits />} />
-            <Route path="business/debts" element={<Debts />} />
-            <Route path="business/calculator" element={<Calculator />} />
-
-            {/* Финансы */}
-            <Route path="expenses" element={<Expenses />} />
-            <Route path="reports" element={<Reports />} />
-
-            {/* Совместимость со старыми ссылками */}
-            <Route path="accounts" element={<Navigate to="/express/accounts" replace />} />
-            <Route path="transfers" element={<Navigate to="/business/transfers" replace />} />
-
-            {/* Администрирование */}
-            <Route
-              path="settings"
-              element={
-                <ProtectedRoute adminOnly>
-                  <Settings />
-                </ProtectedRoute>
-              }
-            />
-            <Route
-              path="users"
-              element={
-                <ProtectedRoute adminOnly>
-                  <Users />
-                </ProtectedRoute>
-              }
-            />
-          </Route>
-
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <ErrorBoundary>
+          <AppRoutes />
+        </ErrorBoundary>
       </BrowserRouter>
     </AuthProvider>
+  )
+}
+
+function AppRoutes() {
+  const { isOperator } = useAuth()
+
+  // Роль «Сотрудник» получает ОТДЕЛЬНОЕ приложение: только страница добавления
+  // продаж Express. Любой другой путь возвращает на неё — никаких финансов.
+  if (isOperator) {
+    return (
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route
+          element={
+            <ProtectedRoute>
+              <OperatorLayout />
+            </ProtectedRoute>
+          }
+        >
+          <Route index element={<OperatorSale />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Route>
+      </Routes>
+    )
+  }
+
+  return (
+    <Routes>
+      <Route path="/login" element={<Login />} />
+
+      <Route
+        element={
+          <ProtectedRoute>
+            <Layout />
+          </ProtectedRoute>
+        }
+      >
+        <Route index element={<Dashboard />} />
+        <Route path="control" element={<Control />} />
+        <Route path="journal" element={<Journal />} />
+
+        {/* Loko Express */}
+        <Route path="sales" element={<Sales />} />
+        <Route path="express/accounts" element={<Accounts module="EXPRESS" />} />
+
+        {/* Loko Business */}
+        <Route path="business/accounts" element={<Accounts module="BUSINESS" />} />
+        <Route path="business/orders" element={<BusinessOrders />} />
+        <Route path="business/transfers" element={<Transfers module="BUSINESS" />} />
+        <Route path="business/deposits" element={<Deposits />} />
+        <Route path="business/debts" element={<Debts />} />
+        <Route path="business/calculator" element={<Calculator />} />
+
+        {/* Финансы */}
+        <Route path="expenses" element={<Expenses />} />
+        <Route path="reports" element={<Reports />} />
+
+        {/* Совместимость со старыми ссылками */}
+        <Route path="accounts" element={<Navigate to="/express/accounts" replace />} />
+        <Route path="transfers" element={<Navigate to="/business/transfers" replace />} />
+
+        {/* Администрирование */}
+        <Route
+          path="settings"
+          element={
+            <ProtectedRoute adminOnly>
+              <Settings />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="users"
+          element={
+            <ProtectedRoute adminOnly>
+              <Users />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* 404 — внутри оболочки приложения, с навигацией */}
+        <Route path="*" element={<NotFound />} />
+      </Route>
+    </Routes>
   )
 }

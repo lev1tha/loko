@@ -37,35 +37,33 @@ export default function Reports() {
   return (
     <>
       <div className="card">
-        <div className="card-header">
-          <div className="toolbar grow">
-            <Field label="С даты">
-              <input className="input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
-            </Field>
-            <Field label="По дату">
-              <input className="input" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
-            </Field>
-            <div className="field">
-              <span className="field-label">Направление</span>
-              <Segmented value={module} onChange={setModule} options={MODULES} />
-            </div>
-            <div className="field">
-              <span className="field-label">Расчёт</span>
-              <Segmented value={payment} onChange={setPayment} options={PAYMENTS} />
-            </div>
-            {report === 'pnl' && (
-              <Field label="Ставка налога, %" hint="Пусто = из настроек">
-                <input className="input" type="number" step="0.01" min="0" value={taxRate}
-                  onChange={(e) => setTaxRate(e.target.value)} placeholder="из настроек" style={{ maxWidth: 140 }} />
-              </Field>
-            )}
+        <div className="filters-grid">
+          <Field label="С даты">
+            <input className="input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+          </Field>
+          <Field label="По дату">
+            <input className="input" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+          </Field>
+          <div className="field">
+            <span className="field-label">Направление</span>
+            <Segmented value={module} onChange={setModule} options={MODULES} />
           </div>
+          <div className="field">
+            <span className="field-label">Расчёт</span>
+            <Segmented value={payment} onChange={setPayment} options={PAYMENTS} />
+          </div>
+          {report === 'pnl' && (
+            <Field label="Ставка налога, %" hint="Пусто = из настроек">
+              <input className="input" type="number" step="0.01" min="0" value={taxRate}
+                onChange={(e) => setTaxRate(e.target.value)} placeholder="из настроек" />
+            </Field>
+          )}
           <div className="field">
             <span className="field-label">Отчёт</span>
             <Segmented value={report} onChange={setReport} options={REPORTS} />
           </div>
         </div>
-        <p className="caption" style={{ margin: 0 }}>
+        <p className="caption" style={{ margin: '12px 0 0' }}>
           💡 Нажмите на «Выручку», «Расходы» или любую подсвеченную строку — откроется детальная
           расшифровка: откуда деньги и как.
         </p>

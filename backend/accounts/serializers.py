@@ -25,7 +25,8 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 class UserCreateSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True, min_length=6)
+    # required=False — чтобы при правке (PUT/PATCH) можно было не менять пароль.
+    password = serializers.CharField(write_only=True, min_length=6, required=False)
 
     class Meta:
         model = User
@@ -40,10 +41,23 @@ class UserCreateSerializer(serializers.ModelSerializer):
         )
 
     def create(self, validated_data):
-        password = validated_data.pop("password")
+        password = validated_data.pop("password", None)
         user = User(**validated_data)
-        user.set_password(password)
+        if password:
+            user.set_password(password)
+        else:
+            user.set_unusable_password()
         user.save()
+        return user
+
+    def update(self, instance, validated_data):
+        # Пароль ДОЛЖЕН хешироваться и при правке — иначе DRF сохранит его
+        # в открытом виде через setattr и заблокирует вход пользователю.
+        password = validated_data.pop("password", None)
+        user = super().update(instance, validated_data)
+        if password:
+            user.set_password(password)
+            user.save(update_fields=["password"])
         return user
 
 

@@ -64,21 +64,21 @@ export default function Settings() {
         {ok && <Alert kind="success">{ok}</Alert>}
 
         <form onSubmit={save} className="col" style={{ marginTop: 8 }}>
-          <Field
-            label="Динамическая себестоимость за 1 кг, сом"
-            hint="Базовая себестоимость. Пересчитывается строго пропорционально весу."
-          >
-            <input
-              className="input"
-              type="number"
-              step="0.01"
-              min="0"
-              value={form.base_cost_per_kg_som}
-              onChange={(e) => update('base_cost_per_kg_som', e.target.value)}
-              required
-            />
-          </Field>
-          <div className="row row-wrap">
+          <div className="form-grid">
+            <Field
+              label="Динамическая себестоимость за 1 кг, сом"
+              hint="Базовая себестоимость. Пересчитывается строго пропорционально весу."
+            >
+              <input
+                className="input"
+                type="number"
+                step="0.01"
+                min="0"
+                value={form.base_cost_per_kg_som}
+                onChange={(e) => update('base_cost_per_kg_som', e.target.value)}
+                required
+              />
+            </Field>
             <Field label="Цена за 1 кг, $">
               <input
                 className="input"
@@ -101,8 +101,6 @@ export default function Settings() {
                 required
               />
             </Field>
-          </div>
-          <div className="row row-wrap">
             <Field label="Курс юаня для отчётов, сом за 1 ¥" hint="Loko Business: пересчёт CNY → сом">
               <input
                 className="input"

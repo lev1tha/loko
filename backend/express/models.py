@@ -124,15 +124,26 @@ class Sale(models.Model):
         if self.amount_mode == self.AmountMode.WEIGHT:
             # Price from weight (0 if weight omitted — вес необязателен).
             self.price_som = _money(weight * self.price_per_kg_usd * self.usd_rate_som)
+            cost_weight = weight
         else:
             # DIRECT: price_som comes from input.
             self.price_som = _money(Decimal(self.price_som or 0))
+            # Если вес не задан — выводим РАСЧЁТНЫЙ вес из суммы (сумма ÷ ставка-за-кг)
+            # ТОЛЬКО для расчёта себестоимости. В поле weight_kg его НЕ пишем: его
+            # разрядность меньше (overflow на крупных суммах), и хранить «искусственный»
+            # вес незачем — экономика остаётся единой с продажами «по весу».
+            cost_weight = weight
+            if cost_weight <= 0:
+                price_rate = self.price_per_kg_usd * self.usd_rate_som
+                if price_rate > 0:
+                    cost_weight = self.price_som / price_rate
 
-        # Cost: manual override (вписанная себестоимость) or dynamic from weight.
+        # Cost: manual override (вписанная себестоимость) or dynamic from weight
+        # (в «прямой сумме» без веса — от расчётного веса, выведенного из суммы).
         if self.cost_is_manual:
             self.cost_som = _money(Decimal(self.cost_som or 0))
         else:
-            self.cost_som = _money(weight * self.cost_per_kg_som)
+            self.cost_som = _money(cost_weight * self.cost_per_kg_som)
 
         self.margin_som = self.price_som - self.cost_som
 

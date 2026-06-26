@@ -199,7 +199,9 @@ SPECTACULAR_SETTINGS = {
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
     # Schema + Swagger/Redoc are NOT public — they expose the whole API surface.
-    "SERVE_PERMISSIONS": ["rest_framework.permissions.IsAuthenticated"],
+    # Operators («Сотрудник») are blocked too: the schema would reveal every
+    # finance/report endpoint they must not even know exists.
+    "SERVE_PERMISSIONS": ["accounts.permissions.DenyOperator"],
     # No SERVERS entry: paths already carry the /api prefix (urlconf include),
     # so adding url:/api would double-prefix Swagger "Try it out" → /api/api/…
     "COMPONENT_SPLIT_REQUEST": True,
