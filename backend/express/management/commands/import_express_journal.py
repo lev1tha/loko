@@ -31,6 +31,9 @@ SHEET = "4. Журнал операций"
 HEADER_ROW = 5
 C_DATE_OP, C_DATE_PAY, C_TYPE, C_KIND = 1, 2, 5, 6
 C_CLIENT, C_METHOD, C_SUM_SOM = 13, 32, 35
+# «Метод оплаты» (32) почти всегда пуст — реальный банк оператор писал в
+# «Комментарий» (36): оптима / optima bank / мбанк / mbank / наличка…
+C_COMMENT = 36
 
 INCOME_TYPES = {"Поступление", "Приход", "Не заплатил"}
 COGS_HINTS = ("себестоим", "закуп", "склад", "таможен", "перевоз", "доставк")
@@ -81,11 +84,13 @@ def parse_date(value, fallback=None):
     return fallback
 
 
-def method_account(method, accounts):
-    m = (str(method) if method else "").strip().lower()
-    if "оптима" in m:
+def method_account(accounts, *texts):
+    """Определяем счёт по «Методу оплаты» И «Комментарию» (банк бывает там и там).
+    Учитываем латиницу (optima/mbank) и частую опечатку «опттима»."""
+    m = " ".join(str(t) for t in texts if t).strip().lower()
+    if "оптима" in m or "optima" in m or "опттима" in m:
         return accounts["Оптима Банк"]
-    if "мбанк" in m or m == "мб":
+    if "мбанк" in m or "mbank" in m or re.search(r"\bмб\b", m):
         return accounts["МБанк"]
     if "налич" in m:
         return accounts["Наличные"]
@@ -168,7 +173,8 @@ class Command(BaseCommand):
             if pay_date and pay_date.year == 2026 and pay_date.month == 2:
                 pay_date = pay_date.replace(month=6)
 
-            acc = method_account(r[C_METHOD], accounts)
+            comment = r[C_COMMENT] if len(r) > C_COMMENT else None
+            acc = method_account(accounts, r[C_METHOD], comment)
             note = " · сумма уточняется" if uncertain else ""
 
             if op_type in INCOME_TYPES:
