@@ -21,6 +21,7 @@ from finance.views import (
     business_orders_report,
     cashflow_report,
     debts_report,
+    journal_report,
     pnl_report,
 )
 
@@ -44,6 +45,7 @@ api_urlpatterns = [
     path("reports/balances/", balances, name="balances"),
     path("reports/debts/", debts_report, name="debts"),
     path("reports/business-orders/", business_orders_report, name="business_orders"),
+    path("reports/journal/", journal_report, name="journal"),
     path("reports/breakdown/", breakdown_report, name="breakdown"),
     # OpenAPI schema + interactive docs (Swagger / Redoc)
     path("schema/", SpectacularAPIView.as_view(), name="schema"),

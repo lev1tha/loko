@@ -12,6 +12,8 @@ import Transfers from './pages/Transfers'
 import Deposits from './pages/Deposits'
 import Debts from './pages/Debts'
 import BusinessOrders from './pages/BusinessOrders'
+import Journal from './pages/Journal'
+import Calculator from './pages/Calculator'
 import Reports from './pages/Reports'
 import Settings from './pages/Settings'
 import Users from './pages/Users'
@@ -32,6 +34,7 @@ export default function App() {
           >
             <Route index element={<Dashboard />} />
             <Route path="control" element={<Control />} />
+            <Route path="journal" element={<Journal />} />
 
             {/* Loko Express */}
             <Route path="sales" element={<Sales />} />
@@ -43,6 +46,7 @@ export default function App() {
             <Route path="business/transfers" element={<Transfers module="BUSINESS" />} />
             <Route path="business/deposits" element={<Deposits />} />
             <Route path="business/debts" element={<Debts />} />
+            <Route path="business/calculator" element={<Calculator />} />
 
             {/* Финансы */}
             <Route path="expenses" element={<Expenses />} />

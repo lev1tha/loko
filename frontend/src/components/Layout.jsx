@@ -22,6 +22,7 @@ const GROUPS = [
     items: [
       { to: '/', label: 'Дашборд', icon: IconDashboard, end: true },
       { to: '/control', label: 'Контроль / сверка', icon: IconReports },
+      { to: '/journal', label: 'Журнал операций', icon: IconReports },
     ],
   },
   {
@@ -39,6 +40,7 @@ const GROUPS = [
       { to: '/business/transfers', label: 'Конвертация / Переводы', icon: IconTransfer },
       { to: '/business/deposits', label: 'Депозиты', icon: IconBox },
       { to: '/business/debts', label: 'Задолженности', icon: IconReports },
+      { to: '/business/calculator', label: 'Калькулятор закупа', icon: IconExpense },
     ],
   },
   {
@@ -61,6 +63,7 @@ const ADMIN_GROUP = {
 const TITLES = {
   '/': ['Дашборд', 'Сводка по Loko (Express + Business)'],
   '/control': ['Контроль / сверка', 'Как складываются итоги — сверка с тетрадью'],
+  '/journal': ['Журнал операций', 'Все события (Express + Business) и как из них вышли цифры'],
   '/sales': ['Продажи', 'Loko Express · учёт карго и расчёт маржи'],
   '/express/accounts': ['Счета Express', 'Остатки касс и банков (сом)'],
   '/business/accounts': ['Счета Business', 'Мультивалютные счета · сом / юань'],
@@ -68,6 +71,7 @@ const TITLES = {
   '/business/transfers': ['Конвертация / Переводы', 'Покупка юаня и движение между счетами'],
   '/business/deposits': ['Депозиты', 'Принятые депозиты и признание выручки'],
   '/business/debts': ['Задолженности', 'Кредиторская и дебиторская'],
+  '/business/calculator': ['Калькулятор закупа', 'Комиссия за закуп и маржа заказа из Китая'],
   '/expenses': ['Расходы', 'Категории, статьи OpEx и списание со счетов'],
   '/reports': ['Отчёты', 'ООПИУ и ОДДС за период'],
   '/settings': ['Настройки', 'Ценообразование, курсы и налог'],

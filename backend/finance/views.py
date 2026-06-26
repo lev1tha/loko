@@ -16,6 +16,7 @@ from .reports import (
     build_pnl,
     business_orders,
     debts_summary,
+    journal,
 )
 from .serializers import (
     AccountSerializer,
@@ -182,6 +183,20 @@ def debts_report(request):
 def business_orders_report(request):
     date_from, date_to, _ = _period_params(request)
     return Response(business_orders(date_from, date_to))
+
+
+@extend_schema(
+    parameters=PERIOD_PARAMS
+    + [OpenApiParameter("module", OpenApiTypes.STR, enum=["EXPRESS", "BUSINESS"], description="Направление")],
+    responses=OpenApiTypes.OBJECT,
+    tags=["reports"],
+)
+@api_view(["GET"])
+@permission_classes([IsAuthenticated])
+def journal_report(request):
+    date_from, date_to, _ = _period_params(request)
+    module = request.query_params.get("module") or None
+    return Response(journal(date_from, date_to, module=module))
 
 
 @extend_schema(

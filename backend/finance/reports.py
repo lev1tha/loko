@@ -523,6 +523,115 @@ def business_orders(date_from=None, date_to=None):
 
 
 # ===========================================================================
+# Журнал ВСЕХ операций (Express + Business) — «как сложились цифры» (доказательство)
+# ===========================================================================
+_JOURNAL_CAP = 1000  # максимум строк в выдаче; итоги считаются по ВСЕМ операциям
+
+
+def journal(date_from=None, date_to=None, module=None):
+    """Единый хронологический журнал всех операций с фильтром по направлению:
+      * Express — продажи (Sale) + расходы карго (Expense).
+      * Business — приходы/авансы/погашения (Deposit), закуп/аванс/изъятие/прочее
+        (Expense), переводы и конвертации (Transfer).
+    Плюс свод — как из этих событий вышли цифры дашборда. Для сверки с Excel.
+    module: None (всё) | "EXPRESS" | "BUSINESS".
+    """
+    from business.models import Deposit
+    from express.models import Sale
+    from .models import Transfer
+
+    want = lambda m: module is None or module == m
+    rate = _rate()  # курс юаня — берём один раз, без запроса к БД на каждую операцию
+    ops = []
+
+    def _kgs(amount, currency):
+        amount = amount or ZERO
+        return (amount * rate).quantize(ZERO) if currency == Currency.CNY else amount
+
+    def add(date_, typ, party, account, amount, currency, flow, effect, ref, mod):
+        amount = amount or ZERO
+        ops.append({
+            "date": date_, "type": typ, "party": party, "account": account,
+            "amount": amount, "currency": currency, "amount_kgs": _kgs(amount, currency),
+            "flow": flow, "effect": effect, "ref": ref, "module": mod,
+        })
+
+    # Продажи Express → выручка (+ динамическая себестоимость, если задана) —
+    # себестоимость живёт на самой продаже (Sale.cost_som), а не отдельным расходом.
+    if want("EXPRESS"):
+        sales = Sale.objects.filter(account__module="EXPRESS").select_related("account")
+        for s in _between(sales, date_from, date_to, "date"):
+            add(s.date, "Продажа Express", s.client_code, s.account.name, s.price_som, "KGS", "in", "Выручка", f"S-{s.id}", "EXPRESS")
+            if s.cost_som and s.cost_som > 0:
+                add(s.date, "Себестоимость карго", s.client_code, s.account.name, s.cost_som, "KGS", "out", "Себестоимость", f"SC-{s.id}", "EXPRESS")
+
+    # Депозиты Business: признанная выручка — по дате признания (как build_pnl),
+    # авансы и погашения — по дате получения.
+    if want("BUSINESS"):
+        dep = Deposit.objects.filter(account__module="BUSINESS").select_related("account")
+        for d in _between(dep.filter(status=Deposit.Status.RECOGNIZED), date_from, date_to, "recognized_date"):
+            add(d.recognized_date or d.date, "Приход клиента", _norm_client(d.source), d.account.name, d.amount, d.currency, "in", "Выручка", f"D-{d.id}", "BUSINESS")
+        for d in _between(dep.exclude(status=Deposit.Status.RECOGNIZED), date_from, date_to, "date"):
+            src = str(d.source or "")
+            typ, effect = ("Погашение долга", "Не влияет на прибыль") if src.startswith("Погашение") else ("Аванс клиента", "Аванс (не выручка)")
+            add(d.date, typ, _norm_client(d.source), d.account.name, d.amount, d.currency, "in", effect, f"D-{d.id}", "BUSINESS")
+
+    # Расходы (по направлению): закуп / опер / аванс поставщику / изъятие / прочее
+    EXP_MAP = {
+        ExpenseCategory.COGS: ("Закуп товара", "Себестоимость"),
+        ExpenseCategory.OPEX: ("Операционный расход", "Опер. расход"),
+        ExpenseCategory.SUPPLIER: ("Оплата/аванс поставщику", "Аванс (не расход)"),
+        ExpenseCategory.OWNER: ("Изъятие собственника", "Вывод (не расход)"),
+        ExpenseCategory.OTHER: ("Прочий расход", "Прочее"),
+        ExpenseCategory.INVEST: ("Покупка оборудования", "Инвестиции"),
+        ExpenseCategory.FINANCING: ("Кредит/проценты", "Финансовое"),
+    }
+    exp = Expense.objects.select_related("account")
+    if module:
+        exp = exp.filter(account__module=module)
+    for e in _between(exp, date_from, date_to, "date"):
+        typ, effect = EXP_MAP.get(e.category, ("Расход", "Прочее"))
+        add(e.date, typ, e.description or typ, e.account.name, e.amount, e.account.currency, "out", effect, f"E-{e.id}", e.account.module)
+
+    # Переводы и конвертации (Business)
+    if want("BUSINESS"):
+        tr = Transfer.objects.filter(from_account__module="BUSINESS").select_related("from_account", "to_account")
+        for t in _between(tr, date_from, date_to, "date"):
+            typ = "Покупка юаня (обмен)" if t.is_conversion else "Внутренний перевод"
+            party = f"{t.from_account.name} → {t.to_account.name}"
+            add(t.date, typ, party, t.from_account.name, t.amount, t.from_account.currency, "move", "Перемещение", f"T-{t.id}", "BUSINESS")
+
+    ops.sort(key=lambda o: (str(o["date"]), o["ref"]), reverse=True)
+
+    def by_effect(eff):
+        return sum((o["amount_kgs"] for o in ops if o["effect"] == eff), ZERO)
+
+    revenue = by_effect("Выручка")
+    cogs = by_effect("Себестоимость")
+    opex = by_effect("Опер. расход")
+    count = len(ops)
+    totals = {
+        "revenue": revenue,
+        "cogs": cogs,
+        "opex": opex,
+        "pre_tax_profit": revenue - cogs - opex,
+        # справочно — не влияют на прибыль
+        "advance_client": by_effect("Аванс (не выручка)"),
+        "advance_supplier": by_effect("Аванс (не расход)"),
+        "owner": by_effect("Вывод (не расход)"),
+        "repayment": by_effect("Не влияет на прибыль"),
+        "count": count,
+    }
+    return {
+        "operations": ops[:_JOURNAL_CAP],
+        "count": count,
+        "shown": min(count, _JOURNAL_CAP),
+        "truncated": count > _JOURNAL_CAP,
+        "totals": totals,
+    }
+
+
+# ===========================================================================
 # Детальная расшифровка строки отчёта — «откуда деньги»
 # ===========================================================================
 BREAKDOWN_LABELS = {

@@ -39,7 +39,7 @@ export default function Accounts({ module }) {
         />
         {isBusiness && (
           <div className="field" style={{ alignItems: 'flex-end' }}>
-            <span className="field-label">Отображение</span>
+            <span className="field-label">Итого в валюте</span>
             <Segmented value={display} onChange={setDisplay} options={DISPLAY} />
           </div>
         )}
@@ -50,9 +50,11 @@ export default function Accounts({ module }) {
           <Stat
             key={a.id}
             label={a.name}
-            value={money(inDisplay(a.current_balance_kgs), display)}
-            tone={signClass(a.current_balance_kgs)}
-            sub={`${money(a.current_balance, a.currency)} · ${a.currency}`}
+            value={money(a.current_balance, a.currency)}
+            tone={signClass(a.current_balance)}
+            sub={a.currency === 'KGS'
+              ? (a.kind === 'CASH' ? 'наличные · сом' : 'банк · сом')
+              : `≈ ${money(a.current_balance_kgs)} в сомах`}
           />
         ))}
       </div>
@@ -75,13 +77,15 @@ export default function Accounts({ module }) {
                 <th className="num">Начальный</th>
                 <th className="num">Поступления</th>
                 <th className="num">Расходы</th>
-                <th className="num">Переводы +/−</th>
+                <th className="num">Переводы +</th>
+                <th className="num">Переводы −</th>
                 <th className="num">Текущий остаток</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((a) => {
-                const net = Number(a.transfers_in) - Number(a.transfers_out)
+                const tin = Number(a.transfers_in)
+                const tout = Number(a.transfers_out)
                 const income = Number(a.income) + Number(a.deposits)
                 return (
                   <tr key={a.id}>
@@ -92,11 +96,10 @@ export default function Accounts({ module }) {
                       </Badge>
                     </td>
                     <td className="num">{money(a.initial_balance, a.currency)}</td>
-                    <td className="num pos">+{money(income, a.currency)}</td>
-                    <td className="num neg">−{money(a.expense, a.currency)}</td>
-                    <td className={`num ${signClass(net)}`}>
-                      {net >= 0 ? '+' : '−'}{money(Math.abs(net), a.currency)}
-                    </td>
+                    <td className="num pos">{income ? '+' + money(income, a.currency) : '—'}</td>
+                    <td className="num neg">{Number(a.expense) ? '−' + money(a.expense, a.currency) : '—'}</td>
+                    <td className="num pos">{tin ? '+' + money(tin, a.currency) : '—'}</td>
+                    <td className="num neg">{tout ? '−' + money(tout, a.currency) : '—'}</td>
                     <td className={`num ${signClass(a.current_balance)}`}>
                       <strong>{money(a.current_balance, a.currency)}</strong>
                     </td>
@@ -106,6 +109,10 @@ export default function Accounts({ module }) {
             </tbody>
           </table>
         </div>
+        <p className="caption mt-lg" style={{ lineHeight: 1.5 }}>
+          «Переводы +» — приход на счёт (покупка юаня / конвертация и переводы с других счетов), «Переводы −» — уход.
+          Остаток = начальный + поступления − расходы + переводы + − переводы −.
+        </p>
       </div>
 
       {showForm && (

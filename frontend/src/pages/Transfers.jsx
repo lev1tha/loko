@@ -13,8 +13,15 @@ export default function Transfers({ module }) {
 
   const params = { from, to, ...(module ? { module } : {}), page_size: 10000 }
   const transfers = useFetch('/transfers/', params)
+  const withdrawals = useFetch('/expenses/', { from, to, category: 'OWNER', ...(module ? { module } : {}), page_size: 10000 })
   const accounts = useFetch('/accounts/', module ? { module, page_size: 10000 } : { page_size: 10000 })
-  const rows = asList(transfers.data)
+
+  // Переводы/конвертации + изъятия «на личный кошелёк» (вывод владельцем) в одном списке, по дате.
+  const movements = [
+    ...asList(transfers.data).map((t) => ({ kind: 'transfer', ...t })),
+    ...asList(withdrawals.data).map((e) => ({ kind: 'withdrawal', ...e })),
+  ].sort((a, b) => String(b.date).localeCompare(String(a.date)))
+  const loading = transfers.loading || withdrawals.loading
 
   return (
     <>
@@ -33,9 +40,9 @@ export default function Transfers({ module }) {
           </button>
         </div>
 
-        {transfers.loading ? (
+        {loading ? (
           <Spinner />
-        ) : rows.length === 0 ? (
+        ) : movements.length === 0 ? (
           <EmptyState>Перемещений за период нет.</EmptyState>
         ) : (
           <div className="table-wrap">
@@ -53,25 +60,43 @@ export default function Transfers({ module }) {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((t) => (
-                  <tr key={t.id}>
-                    <td>{dateRu(t.date)}</td>
-                    <td>{t.from_account_name}</td>
-                    <td className="num">{money(t.amount, t.from_currency)}</td>
+                {movements.map((m) => m.kind === 'transfer' ? (
+                  <tr key={'t' + m.id}>
+                    <td>{dateRu(m.date)}</td>
+                    <td>{m.from_account_name}</td>
+                    <td className="num">{money(m.amount, m.from_currency)}</td>
                     <td className="muted"><IconTransfer size={16} /></td>
                     <td>
-                      <strong>{t.to_account_name}</strong>{' '}
-                      {t.is_conversion && <Badge variant="badge-admin">обмен</Badge>}
+                      <strong>{m.to_account_name}</strong>{' '}
+                      {m.is_conversion && <Badge variant="badge-admin">обмен</Badge>}
                     </td>
-                    <td className="num">{money(t.to_amount, t.to_currency)}</td>
-                    <td className="num">{t.is_conversion ? Number(t.rate).toLocaleString('ru-RU') : '—'}</td>
-                    <td className="muted">{t.description || '—'}</td>
+                    <td className="num">{money(m.to_amount, m.to_currency)}</td>
+                    <td className="num">{m.is_conversion ? Number(m.rate).toLocaleString('ru-RU') : '—'}</td>
+                    <td className="muted">{m.description || '—'}</td>
+                  </tr>
+                ) : (
+                  <tr key={'w' + m.id}>
+                    <td>{dateRu(m.date)}</td>
+                    <td>{m.account_name}</td>
+                    <td className="num">{money(m.amount, m.account_currency)}</td>
+                    <td className="muted"><IconTransfer size={16} /></td>
+                    <td>
+                      <strong>Личный кошелёк</strong>{' '}
+                      <Badge variant="badge-danger">вывод</Badge>
+                    </td>
+                    <td className="num muted">—</td>
+                    <td className="num">—</td>
+                    <td className="muted">{m.description || 'Изъятие собственника'}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         )}
+        <p className="caption mt-lg" style={{ lineHeight: 1.5 }}>
+          Здесь и переводы между счетами, и покупка юаня (обмен), и изъятия «на личный кошелёк» (вывод владельцем).
+          Изъятия также учитываются в разделе «Расходы» (категория «Изъятие собственника»).
+        </p>
       </div>
 
       {showForm && (
