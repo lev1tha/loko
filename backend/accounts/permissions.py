@@ -5,6 +5,10 @@ def _is_operator(user) -> bool:
     return bool(user and user.is_authenticated and getattr(user, "is_operator", False))
 
 
+def _is_director(user) -> bool:
+    return bool(user and user.is_authenticated and getattr(user, "is_director", False))
+
+
 class IsAdmin(BasePermission):
     """Allow access only to administrators."""
 
@@ -37,6 +41,27 @@ class DenyOperator(BasePermission):
         return bool(user and user.is_authenticated and not _is_operator(user))
 
 
+class DenyOperatorOrDirector(BasePermission):
+    """Authenticated access for everyone EXCEPT «Сотрудник» (operator) and
+    «Директор» (director).
+
+    Directors are read-only and scoped to the ОПиУ/ОДДС reports of their own
+    direction — they must never reach the data viewsets (accounts, expenses,
+    transfers, deposits, debts, sales, settings, journal, balances, …).
+    """
+
+    message = "Недостаточно прав: раздел недоступен для этой роли."
+
+    def has_permission(self, request, view):
+        user = request.user
+        return bool(
+            user
+            and user.is_authenticated
+            and not _is_operator(user)
+            and not _is_director(user)
+        )
+
+
 class SalesAccess(BasePermission):
     """Sales endpoint access.
 
@@ -44,6 +69,7 @@ class SalesAccess(BasePermission):
     * Operator («Сотрудник») — may ONLY create a sale, request a price quote
       and read the minimal Express-account picker. No list / edit / delete /
       summary, so no financial figures (revenue, margin, debtors) are exposed.
+    * Director («Директор») — no access at all (read-only reports only).
     """
 
     message = "Сотрудник может только добавлять продажи."
@@ -54,6 +80,8 @@ class SalesAccess(BasePermission):
     def has_permission(self, request, view):
         user = request.user
         if not (user and user.is_authenticated):
+            return False
+        if _is_director(user):
             return False
         if _is_operator(user):
             return getattr(view, "action", None) in self.OPERATOR_ACTIONS

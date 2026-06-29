@@ -4,11 +4,13 @@ import ProtectedRoute from './components/ProtectedRoute'
 import ErrorBoundary from './components/ErrorBoundary'
 import Layout from './components/Layout'
 import OperatorLayout from './components/OperatorLayout'
+import DirectorLayout from './components/DirectorLayout'
 import Login from './pages/Login'
 import NotFound from './pages/NotFound'
 import Dashboard from './pages/Dashboard'
 import Control from './pages/Control'
 import Sales from './pages/Sales'
+import ClientPrices from './pages/ClientPrices'
 import OtherIncome from './pages/OtherIncome'
 import OperatorSale from './pages/OperatorSale'
 import Expenses from './pages/Expenses'
@@ -22,6 +24,7 @@ import Calculator from './pages/Calculator'
 import Reports from './pages/Reports'
 import Settings from './pages/Settings'
 import Users from './pages/Users'
+import Guide from './pages/Guide'
 
 export default function App() {
   return (
@@ -36,7 +39,7 @@ export default function App() {
 }
 
 function AppRoutes() {
-  const { isOperator } = useAuth()
+  const { isOperator, isDirector, directorModule } = useAuth()
 
   // Роль «Сотрудник» получает ОТДЕЛЬНОЕ приложение: только страница добавления
   // продаж Express. Любой другой путь возвращает на неё — никаких финансов.
@@ -52,6 +55,27 @@ function AppRoutes() {
           }
         >
           <Route index element={<OperatorSale />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Route>
+      </Routes>
+    )
+  }
+
+  // Роль «Директор» — ОТДЕЛЬНОЕ приложение: только отчёты ОПиУ/ОДДС своего
+  // направления, read-only. Направление зафиксировано (lockedModule), сервер
+  // дополнительно ограничивает данные его направлением.
+  if (isDirector) {
+    return (
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route
+          element={
+            <ProtectedRoute>
+              <DirectorLayout />
+            </ProtectedRoute>
+          }
+        >
+          <Route index element={<Reports lockedModule={directorModule} />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
@@ -75,7 +99,8 @@ function AppRoutes() {
 
         {/* Loko Express */}
         <Route path="sales" element={<Sales />} />
-        <Route path="express/other-income" element={<OtherIncome />} />
+        <Route path="express/client-prices" element={<ClientPrices />} />
+        <Route path="express/other-income" element={<OtherIncome lockedModule="EXPRESS" />} />
         <Route path="express/expenses" element={<Expenses lockedModule="EXPRESS" />} />
         <Route path="express/transfers" element={<Transfers module="EXPRESS" />} />
         <Route path="express/accounts" element={<Accounts module="EXPRESS" />} />
@@ -86,6 +111,7 @@ function AppRoutes() {
         <Route path="business/orders" element={<BusinessOrders />} />
         <Route path="business/transfers" element={<Transfers module="BUSINESS" />} />
         <Route path="business/deposits" element={<Deposits />} />
+        <Route path="business/other-income" element={<OtherIncome lockedModule="BUSINESS" />} />
         <Route path="business/expenses" element={<Expenses lockedModule="BUSINESS" />} />
         <Route path="business/debts" element={<Debts />} />
         <Route path="business/calculator" element={<Calculator />} />
@@ -113,6 +139,14 @@ function AppRoutes() {
           element={
             <ProtectedRoute adminOnly>
               <Users />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="guide"
+          element={
+            <ProtectedRoute adminOnly>
+              <Guide />
             </ProtectedRoute>
           }
         />

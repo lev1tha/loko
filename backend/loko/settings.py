@@ -205,6 +205,16 @@ SPECTACULAR_SETTINGS = {
     # No SERVERS entry: paths already carry the /api prefix (urlconf include),
     # so adding url:/api would double-prefix Swagger "Try it out" → /api/api/…
     "COMPONENT_SPLIT_REQUEST": True,
+    # Несколько enum-ов с полем «module» сталкиваются по имени: finance.Module
+    # (3 значения, у счетов), направление директора (2 значения, с метками) и
+    # enum параметра ?module= в отчётах (2 значения, без меток). Даём каждому
+    # стабильное имя — иначе spectacular ругается на коллизию (Module404Enum).
+    # Хэш учитывает (value, label), поэтому ссылаемся на сами классы Choices.
+    "ENUM_NAME_OVERRIDES": {
+        "ModuleEnum": "finance.models.Module",
+        "DirectorDirectionEnum": "accounts.models.User.Direction",
+        "ModuleParamEnum": ["EXPRESS", "BUSINESS"],
+    },
 }
 
 

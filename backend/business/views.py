@@ -4,14 +4,14 @@ from rest_framework.response import Response
 
 from drf_spectacular.utils import extend_schema, inline_serializer
 
-from accounts.permissions import DenyOperator
+from accounts.permissions import DenyOperatorOrDirector
 from .models import Debt, Deposit
 from .serializers import DebtSerializer, DepositSerializer
 
 
 class DepositViewSet(viewsets.ModelViewSet):
     serializer_class = DepositSerializer
-    permission_classes = [DenyOperator]
+    permission_classes = [DenyOperatorOrDirector]
 
     def get_queryset(self):
         qs = Deposit.objects.select_related("account").all()
@@ -76,7 +76,7 @@ class DepositViewSet(viewsets.ModelViewSet):
 
 class DebtViewSet(viewsets.ModelViewSet):
     serializer_class = DebtSerializer
-    permission_classes = [DenyOperator]
+    permission_classes = [DenyOperatorOrDirector]
 
     def get_queryset(self):
         qs = Debt.objects.all()

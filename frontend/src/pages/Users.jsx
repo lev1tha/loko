@@ -1,16 +1,35 @@
 import { useState } from 'react'
 import api, { errorMessage } from '../api/client'
+import { useAuth } from '../auth/AuthContext'
 import { useFetch, asList } from '../lib/hooks'
 import { Alert, Badge, EmptyState, Field, Modal, Spinner } from '../components/ui'
-import { IconPlus } from '../components/icons'
+import { IconPlus, IconTrash } from '../components/icons'
 
 export default function Users() {
+  const { user } = useAuth()
   const users = useFetch('/users/')
   const [showForm, setShowForm] = useState(false)
+  const [busyId, setBusyId] = useState(null)
+  const [error, setError] = useState('')
   const rows = asList(users.data)
+
+  async function remove(u) {
+    if (!window.confirm(`Удалить пользователя «${u.username}»? Действие необратимо.`)) return
+    setBusyId(u.id)
+    setError('')
+    try {
+      await api.delete(`/users/${u.id}/`)
+      users.reload()
+    } catch (err) {
+      setError(errorMessage(err))
+    } finally {
+      setBusyId(null)
+    }
+  }
 
   return (
     <>
+      {error && <Alert kind="error">{error}</Alert>}
       <div className="card">
         <div className="card-header">
           <span className="card-title">Пользователи системы</span>
@@ -31,7 +50,9 @@ export default function Users() {
                   <th>Логин</th>
                   <th>Имя</th>
                   <th>Роль</th>
+                  <th>Направление</th>
                   <th>Статус</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -42,10 +63,25 @@ export default function Users() {
                     <td>
                       <Badge variant={u.is_admin ? 'badge-admin' : 'badge-manager'}>{u.role_display}</Badge>
                     </td>
+                    <td className="muted">{u.role === 'DIRECTOR' ? (u.module_display || '—') : '—'}</td>
                     <td>
                       <Badge variant={u.is_active ? 'badge-success' : 'badge-danger'}>
                         {u.is_active ? 'Активен' : 'Отключён'}
                       </Badge>
+                    </td>
+                    <td className="num">
+                      {u.id === user?.id ? (
+                        <span className="caption muted">вы</span>
+                      ) : (
+                        <button
+                          className="btn btn-icon btn-danger btn-sm"
+                          title="Удалить пользователя"
+                          disabled={busyId === u.id}
+                          onClick={() => remove(u)}
+                        >
+                          <IconTrash size={16} />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -72,9 +108,12 @@ function UserForm({ onClose, onSaved }) {
   const [username, setUsername] = useState('')
   const [firstName, setFirstName] = useState('')
   const [role, setRole] = useState('MANAGER')
+  const [module, setModule] = useState('EXPRESS')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+
+  const isDirector = role === 'DIRECTOR'
 
   async function submit(e) {
     e.preventDefault()
@@ -85,6 +124,8 @@ function UserForm({ onClose, onSaved }) {
         username: username.trim(),
         first_name: firstName.trim(),
         role,
+        // Направление шлём только для директора (остальным сервер обнулит).
+        module: isDirector ? module : null,
         password,
       })
       onSaved()
@@ -119,10 +160,19 @@ function UserForm({ onClose, onSaved }) {
         <Field label="Роль">
           <select className="select" value={role} onChange={(e) => setRole(e.target.value)}>
             <option value="MANAGER">Кассир/Менеджер</option>
+            <option value="DIRECTOR">Директор (только просмотр отчётов направления)</option>
             <option value="OPERATOR">Сотрудник (только добавление продаж)</option>
             <option value="ADMIN">Администратор</option>
           </select>
         </Field>
+        {isDirector && (
+          <Field label="Направление директора" hint="Какие отчёты ОПиУ/ОДДС он будет видеть">
+            <select className="select" value={module} onChange={(e) => setModule(e.target.value)}>
+              <option value="EXPRESS">Loko Express</option>
+              <option value="BUSINESS">Loko Business</option>
+            </select>
+          </Field>
+        )}
         <Field label="Пароль" hint="Минимум 6 символов">
           <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} />
         </Field>

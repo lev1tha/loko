@@ -9,7 +9,7 @@ from rest_framework.views import APIView
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 
-from accounts.permissions import DenyOperator, IsAdmin
+from accounts.permissions import DenyOperator, DenyOperatorOrDirector, IsAdmin
 from .models import Account, AppSettings, Expense, OtherIncome, Transfer
 from .reports import (
     accounts_snapshot,
@@ -39,6 +39,16 @@ def _period_params(request):
     return date_from, date_to, payment
 
 
+def _scoped_module(request):
+    """Направление отчёта. Для директора жёстко фиксируется его направлением
+    (защита на сервере — клиент не может попросить чужой раздел)."""
+    user = request.user
+    if getattr(user, "is_director", False):
+        # Директор без направления не видит ничего (служебный «нет данных»).
+        return user.module or "__none__"
+    return request.query_params.get("module") or None
+
+
 # Reusable OpenAPI query parameters shared by the report endpoints.
 PERIOD_PARAMS = [
     OpenApiParameter("from", OpenApiTypes.DATE, description="Начало периода (YYYY-MM-DD)"),
@@ -54,9 +64,9 @@ class AppSettingsView(APIView):
     def get_permissions(self):
         if self.request.method in ("PUT", "PATCH"):
             return [IsAdmin()]
-        # Read is open to managers/admins but blocked for the operator role
-        # (settings expose tax rates / cost price — financial parameters).
-        return [DenyOperator()]
+        # Read is open to managers/admins but blocked for the operator and
+        # director roles (settings expose tax rates / cost price).
+        return [DenyOperatorOrDirector()]
 
     @extend_schema(responses=AppSettingsSerializer)
     def get(self, request):
@@ -90,8 +100,8 @@ class AccountViewSet(viewsets.ModelViewSet):
 
     def get_permissions(self):
         if self.action in ("list", "retrieve"):
-            # Account listings carry balances → never exposed to operators.
-            return [DenyOperator()]
+            # Account listings carry balances → never exposed to operators/directors.
+            return [DenyOperatorOrDirector()]
         return [IsAdmin()]
 
     def destroy(self, request, *args, **kwargs):
@@ -108,7 +118,7 @@ class AccountViewSet(viewsets.ModelViewSet):
 
 class ExpenseViewSet(viewsets.ModelViewSet):
     serializer_class = ExpenseSerializer
-    permission_classes = [DenyOperator]
+    permission_classes = [DenyOperatorOrDirector]
 
     def get_queryset(self):
         qs = Expense.objects.select_related("account").all()
@@ -134,7 +144,7 @@ class ExpenseViewSet(viewsets.ModelViewSet):
 
 class OtherIncomeViewSet(viewsets.ModelViewSet):
     serializer_class = OtherIncomeSerializer
-    permission_classes = [DenyOperator]
+    permission_classes = [DenyOperatorOrDirector]
 
     def get_queryset(self):
         qs = OtherIncome.objects.select_related("account").all()
@@ -157,7 +167,7 @@ class OtherIncomeViewSet(viewsets.ModelViewSet):
 
 class TransferViewSet(viewsets.ModelViewSet):
     serializer_class = TransferSerializer
-    permission_classes = [DenyOperator]
+    permission_classes = [DenyOperatorOrDirector]
 
     def get_queryset(self):
         qs = Transfer.objects.select_related("from_account", "to_account").all()
@@ -185,7 +195,7 @@ class TransferViewSet(viewsets.ModelViewSet):
 @permission_classes([DenyOperator])
 def pnl_report(request):
     date_from, date_to, payment = _period_params(request)
-    module = request.query_params.get("module") or None
+    module = _scoped_module(request)
     # Санитизируем ручную ставку налога: только неотрицательное число, иначе игнор.
     tax_rate = request.query_params.get("tax_rate")
     if tax_rate in ("", None):
@@ -209,7 +219,7 @@ def pnl_report(request):
 @permission_classes([DenyOperator])
 def cashflow_report(request):
     date_from, date_to, payment = _period_params(request)
-    module = request.query_params.get("module") or None
+    module = _scoped_module(request)
     opening_override = None
     raw = request.query_params.get("opening")
     if raw not in (None, ""):
@@ -233,7 +243,7 @@ def cashflow_report(request):
 @permission_classes([DenyOperator])
 def monthly_report(request):
     date_from, date_to, _ = _period_params(request)
-    module = request.query_params.get("module") or None
+    module = _scoped_module(request)
     report = request.query_params.get("report", "pnl")
     if report not in ("pnl", "cashflow"):
         report = "pnl"
@@ -246,7 +256,7 @@ def monthly_report(request):
     tags=["reports"],
 )
 @api_view(["GET"])
-@permission_classes([DenyOperator])
+@permission_classes([DenyOperatorOrDirector])
 def balances(request):
     module = request.query_params.get("module")
     return Response(accounts_snapshot(module=module))
@@ -254,14 +264,14 @@ def balances(request):
 
 @extend_schema(responses=OpenApiTypes.OBJECT, tags=["reports"])
 @api_view(["GET"])
-@permission_classes([DenyOperator])
+@permission_classes([DenyOperatorOrDirector])
 def debts_report(request):
     return Response(debts_summary())
 
 
 @extend_schema(parameters=PERIOD_PARAMS, responses=OpenApiTypes.OBJECT, tags=["reports"])
 @api_view(["GET"])
-@permission_classes([DenyOperator])
+@permission_classes([DenyOperatorOrDirector])
 def business_orders_report(request):
     date_from, date_to, _ = _period_params(request)
     return Response(business_orders(date_from, date_to))
@@ -279,7 +289,7 @@ def business_orders_report(request):
     tags=["reports"],
 )
 @api_view(["GET"])
-@permission_classes([DenyOperator])
+@permission_classes([DenyOperatorOrDirector])
 def journal_report(request):
     date_from, date_to, _ = _period_params(request)
     module = request.query_params.get("module") or None
@@ -316,6 +326,6 @@ def journal_report(request):
 def breakdown_report(request):
     date_from, date_to, payment = _period_params(request)
     line = request.query_params.get("line", "revenue")
-    module = request.query_params.get("module") or None
+    module = _scoped_module(request)
     basis = request.query_params.get("basis", "accrual")
     return Response(breakdown(line, date_from, date_to, payment, module, basis))

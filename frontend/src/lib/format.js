@@ -26,7 +26,8 @@ export function num(value, digits = 2) {
 }
 
 export function kg(value) {
-  return fmt(value, 3) + ' кг'
+  // Вес показываем с 2 знаками после запятой (0,00 кг).
+  return fmt(value, 2) + ' кг'
 }
 
 export function dateRu(value) {

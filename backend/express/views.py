@@ -13,10 +13,10 @@ from drf_spectacular.utils import (
     inline_serializer,
 )
 
-from accounts.permissions import SalesAccess
+from accounts.permissions import DenyOperatorOrDirector, SalesAccess
 from finance.models import Account, AppSettings
-from .models import Sale
-from .serializers import OperatorSaleSerializer, SaleSerializer
+from .models import ClientPrice, Sale
+from .serializers import ClientPriceSerializer, OperatorSaleSerializer, SaleSerializer
 
 ZERO = Decimal("0.00")
 
@@ -96,13 +96,19 @@ class SaleViewSet(viewsets.ModelViewSet):
     @extend_schema(
         request=inline_serializer(
             "SaleQuoteRequest",
-            {"weight_kg": serializers.DecimalField(max_digits=10, decimal_places=3)},
+            {
+                "weight_kg": serializers.DecimalField(max_digits=10, decimal_places=3),
+                "client_code": serializers.CharField(required=False),
+            },
         ),
         responses=OpenApiTypes.OBJECT,
     )
     @action(detail=False, methods=["post"], url_path="quote")
     def quote(self, request):
-        """Live price/cost/margin preview without persisting a sale."""
+        """Live price/cost/margin preview without persisting a sale.
+
+        Если передан ``client_code`` со спец-ценой — итог считается по цене клиента
+        (саму цену в ответе оператору не раскрываем — только итоговую стоимость)."""
         cfg = AppSettings.load()
         try:
             weight = Decimal(str(request.data.get("weight_kg", "0")))
@@ -112,7 +118,16 @@ class SaleViewSet(viewsets.ModelViewSet):
         # quantize переполняется → 500). Верх — ёмкость поля weight_kg.
         if not weight.is_finite() or weight < 0 or weight > Decimal("9999999.999"):
             weight = ZERO
-        price = (weight * cfg.price_per_kg_usd * cfg.usd_rate_som).quantize(ZERO)
+        # Спец-цена клиента (если есть) — иначе цена по умолчанию из Настроек.
+        code = (request.data.get("client_code") or "").strip()
+        unit = (
+            ClientPrice.objects.filter(client_code=code).values_list("price_per_kg_som", flat=True).first()
+            if code else None
+        )
+        if unit is not None:
+            price = (weight * unit).quantize(ZERO)
+        else:
+            price = (weight * cfg.price_per_kg_usd * cfg.usd_rate_som).quantize(ZERO)
         cost = (weight * cfg.base_cost_per_kg_som).quantize(ZERO)
         # Операторам («Сотрудник») отдаём ТОЛЬКО общую стоимость — без себестоимости,
         # маржи и ставок (даже на уровне API, чтобы их не было видно в devtools).
@@ -143,3 +158,40 @@ class SaleViewSet(viewsets.ModelViewSet):
             module="EXPRESS", currency="KGS", is_active=True
         ).order_by("name")
         return Response([{"id": a.id, "name": a.name, "kind": a.kind} for a in qs])
+
+
+@extend_schema_view(
+    list=extend_schema(
+        parameters=[OpenApiParameter("client_code", OpenApiTypes.STR, description="Точный код клиента (для подстановки цены)")]
+    )
+)
+class ClientPriceViewSet(viewsets.ModelViewSet):
+    """Индивидуальные цены за кг по клиентам (Express).
+
+    Менеджер/админ управляют; операторы и директора — без доступа. Создание —
+    «upsert»: если для кода клиента цена уже есть, обновляем её (не плодим дубли)."""
+
+    serializer_class = ClientPriceSerializer
+    permission_classes = [DenyOperatorOrDirector]
+
+    def get_queryset(self):
+        qs = ClientPrice.objects.all()
+        code = self.request.query_params.get("client_code")
+        if code:
+            qs = qs.filter(client_code=code.strip())
+        return qs
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
+    def create(self, request, *args, **kwargs):
+        # Upsert по коду клиента: повторное сохранение обновляет цену, а не падает
+        # на unique-ограничении.
+        code = (request.data.get("client_code") or "").strip()
+        existing = ClientPrice.objects.filter(client_code=code).first()
+        if existing:
+            serializer = self.get_serializer(existing, data=request.data, partial=True)
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            return Response(serializer.data)
+        return super().create(request, *args, **kwargs)

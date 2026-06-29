@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import {
   IconAccounts,
+  IconBook,
   IconBox,
   IconDashboard,
   IconExpense,
@@ -20,40 +21,42 @@ import './Layout.css'
 const GROUPS = [
   {
     items: [
-      { to: '/', label: 'Дашборд', icon: IconDashboard, end: true },
-      { to: '/control', label: 'Контроль / сверка', icon: IconReports },
-      { to: '/journal', label: 'Журнал операций', icon: IconReports },
+      { to: '/', label: 'Сводка', icon: IconDashboard, end: true },
+      { to: '/control', label: 'Сверка', icon: IconReports },
+      { to: '/journal', label: 'История операций', icon: IconReports },
     ],
   },
   {
     title: 'Loko Express',
     items: [
       { to: '/sales', label: 'Продажи', icon: IconSales },
+      { to: '/express/client-prices', label: 'Цены клиентов', icon: IconAccounts },
       { to: '/express/other-income', label: 'Прочий доход', icon: IconSales },
       { to: '/express/expenses', label: 'Расходы', icon: IconExpense },
-      { to: '/express/transfers', label: 'Переводы / Изъятия', icon: IconTransfer },
-      { to: '/express/accounts', label: 'Счета Express', icon: IconAccounts },
-      { to: '/express/reports', label: 'Отчёты (ОПиУ/ОДДС)', icon: IconReports },
+      { to: '/express/transfers', label: 'Переводы и выплаты', icon: IconTransfer },
+      { to: '/express/accounts', label: 'Счета', icon: IconAccounts },
+      { to: '/express/reports', label: 'Аналитика', icon: IconReports },
     ],
   },
   {
     title: 'Loko Business',
     items: [
-      { to: '/business/accounts', label: 'Счета Business', icon: IconAccounts },
-      { to: '/business/orders', label: 'Заказы (маржа)', icon: IconSales },
-      { to: '/business/transfers', label: 'Конвертация / Переводы', icon: IconTransfer },
+      { to: '/business/accounts', label: 'Счета', icon: IconAccounts },
+      { to: '/business/orders', label: 'Заказы', icon: IconSales },
+      { to: '/business/transfers', label: 'Обмен и переводы', icon: IconTransfer },
       { to: '/business/deposits', label: 'Депозиты', icon: IconBox },
+      { to: '/business/other-income', label: 'Поступления', icon: IconSales },
       { to: '/business/expenses', label: 'Расходы', icon: IconExpense },
       { to: '/business/debts', label: 'Задолженности', icon: IconReports },
-      { to: '/business/calculator', label: 'Калькулятор закупа', icon: IconExpense },
-      { to: '/business/reports', label: 'Отчёты (ОПиУ/ОДДС)', icon: IconReports },
+      { to: '/business/calculator', label: 'Калькулятор', icon: IconExpense },
+      { to: '/business/reports', label: 'Аналитика', icon: IconReports },
     ],
   },
   {
     title: 'Финансы',
     items: [
       { to: '/expenses', label: 'Расходы', icon: IconExpense },
-      { to: '/reports', label: 'Отчёты (ООПИУ/ОДДС)', icon: IconReports },
+      { to: '/reports', label: 'Аналитика', icon: IconReports },
     ],
   },
 ]
@@ -66,28 +69,39 @@ const ADMIN_GROUP = {
   ],
 }
 
+// Отдельная группа внизу — инструкция по системе (только для админа).
+const HELP_GROUP = {
+  title: 'Справка',
+  items: [
+    { to: '/guide', label: 'Инструкция', icon: IconBook },
+  ],
+}
+
 const TITLES = {
-  '/': ['Дашборд', 'Сводка по Loko (Express + Business)'],
-  '/control': ['Контроль / сверка', 'Как складываются итоги — сверка с тетрадью'],
-  '/journal': ['Журнал операций', 'Все события (Express + Business) и как из них вышли цифры'],
+  '/': ['Сводка', 'Сводка по Loko (Express + Business)'],
+  '/control': ['Сверка', 'Как складываются итоги — сверка с тетрадью'],
+  '/journal': ['История операций', 'Все события (Express + Business) и как из них вышли цифры'],
   '/sales': ['Продажи', 'Loko Express · учёт карго и расчёт маржи'],
+  '/express/client-prices': ['Цены клиентов', 'Индивидуальная цена за кг по клиентам (исключения из цены по умолчанию)'],
   '/express/other-income': ['Прочий доход', 'Доходы не от карго — в выручку без себестоимости 55%'],
   '/express/expenses': ['Расходы · Loko Express', 'Типы расходов, изъятия и статьи — по Express'],
-  '/express/transfers': ['Переводы / Изъятия · Express', 'Переводы между счетами Express и вывод владельцем'],
-  '/express/accounts': ['Счета Express', 'Остатки касс и банков (сом)'],
-  '/express/reports': ['Отчёты · Loko Express', 'ОПиУ и ОДДС по направлению Express'],
-  '/business/accounts': ['Счета Business', 'Мультивалютные счета · сом / юань'],
+  '/express/transfers': ['Переводы и выплаты · Express', 'Переводы между счетами Express и вывод владельцем'],
+  '/express/accounts': ['Счета · Loko Express', 'Остатки касс и банков (сом)'],
+  '/express/reports': ['Аналитика · Loko Express', 'ОПиУ и ОДДС по направлению Express'],
+  '/business/accounts': ['Счета · Loko Business', 'Мультивалютные счета · сом / юань'],
   '/business/orders': ['Заказы Business', 'Маржа по клиентам: выручка − закуп'],
-  '/business/transfers': ['Конвертация / Переводы', 'Покупка юаня и движение между счетами'],
+  '/business/transfers': ['Обмен и переводы', 'Покупка юаня и движение между счетами'],
   '/business/deposits': ['Депозиты', 'Принятые депозиты и признание выручки'],
+  '/business/other-income': ['Поступления · Loko Business', 'Доходы не от закупа — в выручку без себестоимости, приток ОДДС'],
   '/business/expenses': ['Расходы · Loko Business', 'Типы расходов, изъятия и статьи — по Business'],
   '/business/debts': ['Задолженности', 'Кредиторская и дебиторская'],
   '/business/calculator': ['Калькулятор закупа', 'Комиссия за закуп и маржа заказа из Китая'],
-  '/business/reports': ['Отчёты · Loko Business', 'ОПиУ и ОДДС по направлению Business'],
+  '/business/reports': ['Аналитика · Loko Business', 'ОПиУ и ОДДС по направлению Business'],
   '/expenses': ['Расходы', 'Категории, статьи OpEx и списание со счетов'],
-  '/reports': ['Отчёты', 'ООПИУ и ОДДС за период'],
+  '/reports': ['Аналитика', 'ООПИУ и ОДДС за период'],
   '/settings': ['Настройки', 'Ценообразование, курсы и налог'],
   '/users': ['Пользователи', 'Управление доступом и ролями'],
+  '/guide': ['Инструкция', 'Как пользоваться системой — для администраторов'],
 }
 
 export default function Layout() {
@@ -98,7 +112,7 @@ export default function Layout() {
   const initials = (user?.username || '?').slice(0, 2).toUpperCase()
   const close = () => setOpen(false)
 
-  const groups = isAdmin ? [...GROUPS, ADMIN_GROUP] : GROUPS
+  const groups = isAdmin ? [...GROUPS, ADMIN_GROUP, HELP_GROUP] : GROUPS
 
   return (
     <div className="app-shell">

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useFetch } from '../lib/hooks'
 import { firstOfMonth, today, money, num, dateRu, signClass } from '../lib/format'
-import { EmptyState, Field, Modal, Segmented, Spinner, Stat } from '../components/ui'
+import { Badge, EmptyState, Field, Modal, Segmented, Spinner, Stat } from '../components/ui'
 
 const PAYMENTS = [
   { value: 'all', label: 'Все' },
@@ -131,8 +131,11 @@ function BreakdownModal({ line, label, basis, params, onClose }) {
   const d = data.data || {}
   const items = d.items || []
 
+  // Показывать колонку «Тип / статья», только если у операций он есть (расходы).
+  const hasKind = items.some((it) => it.kind || it.article)
+
   return (
-    <Modal title={`Расшифровка: ${label}`} onClose={onClose}>
+    <Modal title={`Расшифровка: ${label}`} onClose={onClose} wide>
       {data.loading ? (
         <Spinner />
       ) : (
@@ -141,13 +144,14 @@ function BreakdownModal({ line, label, basis, params, onClose }) {
             <Stat label="Итого" value={money(d.total)} />
             <Stat label="Операций" value={num(d.count || 0, 0)} sub={d.truncated ? `показано ${d.shown}` : null} />
           </div>
-          <div className="table-wrap" style={{ maxHeight: '52vh', overflowY: 'auto' }}>
+          <div className="table-wrap" style={{ maxHeight: '60vh', overflowY: 'auto' }}>
             <table className="table" style={{ minWidth: 0 }}>
               <thead>
                 <tr>
                   <th>№</th>
                   <th>Дата</th>
                   <th>Операция</th>
+                  {hasKind && <th>Тип / статья</th>}
                   <th>Счёт</th>
                   <th className="num">Сумма</th>
                 </tr>
@@ -158,6 +162,12 @@ function BreakdownModal({ line, label, basis, params, onClose }) {
                     <td className="caption muted">{it.id}</td>
                     <td>{dateRu(it.date)}</td>
                     <td>{it.title}</td>
+                    {hasKind && (
+                      <td>
+                        {it.kind && <Badge>{it.kind}</Badge>}
+                        {it.article && <span className="caption muted" style={{ marginLeft: 6 }}>{it.article}</span>}
+                      </td>
+                    )}
                     <td className="muted">{it.account}</td>
                     <td className="num">{money(it.amount, it.currency)}</td>
                   </tr>
@@ -232,9 +242,10 @@ function Pnl({ data, onDrill }) {
             <Line label="Валовая прибыль" value={d.gross_profit} strong level />
             <Line label="Валовая маржа, %" value={null} sub={`${Number(d.gross_margin_pct || 0)} %`} indent />
             <Line label="Операционные расходы" sub={`${d.opex_count ?? 0} опер.`} value={d.operating_expenses} sign="minus" lineKey="opex" onDrill={onDrill} />
-            {order.map((k) => arts[k] && (
+            {/* Показываем только статьи с данными — нулевые (Аренда 0, ФОТ 0…) не засоряют отчёт. */}
+            {order.map((k) => arts[k] && (Number(arts[k].amount) || Number(arts[k].count)) ? (
               <Line key={k} label={arts[k].label} sub={arts[k].count ? `${arts[k].count} опер.` : null} value={arts[k].amount} sign="minus" indent lineKey={`opex_${k}`} onDrill={onDrill} />
-            ))}
+            ) : null)}
             <Line label="Операционная прибыль" value={d.operating_profit} strong level />
             <Line label="Прочие расходы" value={d.other_expenses} sign="minus" indent lineKey="other" onDrill={onDrill} />
             <Line label="Финансовые расходы" value={d.financial_expenses} sign="minus" indent />

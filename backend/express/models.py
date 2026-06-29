@@ -109,6 +109,33 @@ class Sale(models.Model):
         """Дебиторка по продаже = начисление − оплата."""
         return (self.price_som or Decimal("0")) - (self.paid_som or Decimal("0"))
 
+    @property
+    def est_weight_kg(self) -> Decimal | None:
+        """Расчётный («предположительный») вес для показа админу.
+
+        Если вес задан — возвращаем его. В режиме «прямая сумма» вес не хранится,
+        поэтому выводим его из суммы: цена ÷ (цена_за_кг_$ × курс_$). Округляем до
+        2 знаков (как просили для отображения)."""
+        if self.weight_kg is not None:
+            return self.weight_kg.quantize(TWO_PLACES, rounding=ROUND_HALF_UP)
+        rate = (self.price_per_kg_usd or Decimal("0")) * (self.usd_rate_som or Decimal("0"))
+        if rate > 0 and self.price_som:
+            return (self.price_som / rate).quantize(TWO_PLACES, rounding=ROUND_HALF_UP)
+        return None
+
+    def _client_unit_price(self):
+        """Спец-цена за 1 кг (сом) для этого клиента, если задана; иначе None.
+
+        Позволяет «по весу» считать сумму по индивидуальной цене клиента (250/220
+        вместо 270) — в т.ч. для сотрудника, который саму цену не видит."""
+        if not self.client_code:
+            return None
+        return (
+            ClientPrice.objects.filter(client_code=self.client_code)
+            .values_list("price_per_kg_som", flat=True)
+            .first()
+        )
+
     def _apply_pricing(self):
         """Fill snapshot params, compute price/cost/margin per amount mode."""
         cfg = AppSettings.load()
@@ -122,8 +149,13 @@ class Sale(models.Model):
         weight = Decimal(self.weight_kg) if self.weight_kg not in (None, "") else Decimal("0")
 
         if self.amount_mode == self.AmountMode.WEIGHT:
-            # Price from weight (0 if weight omitted — вес необязателен).
-            self.price_som = _money(weight * self.price_per_kg_usd * self.usd_rate_som)
+            # Цена за кг: спец-цена клиента (если есть), иначе цена по умолчанию
+            # (цена_за_кг_$ × курс). Сумма (0, если вес не указан — вес необязателен).
+            unit = self._client_unit_price()
+            if unit is not None:
+                self.price_som = _money(weight * unit)
+            else:
+                self.price_som = _money(weight * self.price_per_kg_usd * self.usd_rate_som)
             cost_weight = weight
         else:
             # DIRECT: price_som comes from input.
@@ -156,3 +188,31 @@ class Sale(models.Model):
     def save(self, *args, **kwargs):
         self._apply_pricing()
         super().save(*args, **kwargs)
+
+
+class ClientPrice(models.Model):
+    """Индивидуальная цена за 1 кг (сом) для конкретного клиента (по коду).
+
+    По умолчанию цена за кг берётся из Настроек (3$ × курс ≈ 270 сом). Если у
+    клиента есть своя цена (напр. 250 или 220 сом/кг) — она подставляется в новой
+    продаже Express «по весу» и её можно переопределить вручную."""
+
+    client_code = models.CharField(max_length=120, unique=True, verbose_name="Код клиента")
+    price_per_kg_som = models.DecimalField(
+        max_digits=10, decimal_places=2, verbose_name="Цена за 1 кг (сом)"
+    )
+    note = models.CharField(max_length=255, blank=True, verbose_name="Комментарий")
+    created_by = models.ForeignKey(
+        dj_settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="client_prices",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Цена клиента"
+        verbose_name_plural = "Цены клиентов"
+        ordering = ("client_code",)
+
+    def __str__(self) -> str:
+        return f"{self.client_code}: {self.price_per_kg_som} сом/кг"

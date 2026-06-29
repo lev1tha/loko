@@ -838,6 +838,8 @@ def breakdown(line, date_from=None, date_to=None, payment="all", module=None, ba
     items = []
 
     def sale_items(value_field=sale_amt):
+        is_cost = value_field == "cost_som"
+        kind = "Себестоимость карго" if is_cost else "Продажа Express"
         qs = _by_module(Sale.objects.filter(account__kind__in=kinds), module).select_related("account")
         for s in _between(qs, date_from, date_to, sale_date).order_by("-" + sale_date):
             amt = getattr(s, value_field)
@@ -846,6 +848,7 @@ def breakdown(line, date_from=None, date_to=None, payment="all", module=None, ba
             items.append({
                 "id": f"S-{s.id}", "date": getattr(s, sale_date) or s.date,
                 "title": f"Продажа · {s.client_code}", "account": s.account.name,
+                "kind": kind, "article": None,
                 "amount": amt, "currency": "KGS", "amount_kgs": amt,
             })
 
@@ -857,6 +860,7 @@ def breakdown(line, date_from=None, date_to=None, payment="all", module=None, ba
             items.append({
                 "id": f"D-{d.id}", "date": getattr(d, field) or d.date,
                 "title": f"Депозит · {d.source}", "account": d.account.name,
+                "kind": "Признанная выручка" if recognized else "Депозит/аванс", "article": None,
                 "amount": d.amount, "currency": d.currency, "amount_kgs": d.kgs_value,
             })
 
@@ -866,11 +870,15 @@ def breakdown(line, date_from=None, date_to=None, payment="all", module=None, ba
             amt = getattr(e, exp_amt)
             if not amt:
                 continue
-            label = e.get_opex_article_display() if e.opex_article else e.get_category_display()
-            title = e.description or label
+            # «Какой именно расход»: категория (Опер./Изъятие/Закуп/…) + статья
+            # (Аренда/ФОТ/Подоходный/…). Заголовок — комментарий или статья.
+            cat_label = e.get_category_display()
+            article_label = e.get_opex_article_display() if e.opex_article else None
+            title = e.description or article_label or cat_label
             items.append({
                 "id": f"E-{e.id}", "date": getattr(e, exp_date) or e.date,
                 "title": title, "account": e.account.name,
+                "kind": cat_label, "article": article_label,
                 "amount": amt, "currency": e.account.currency,
                 "amount_kgs": kgs_of(amt, e.account.currency, e.kgs_rate),
             })
