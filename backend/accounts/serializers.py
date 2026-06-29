@@ -7,7 +7,9 @@ User = get_user_model()
 
 class UserSerializer(serializers.ModelSerializer):
     role_display = serializers.CharField(source="get_role_display", read_only=True)
+    module_display = serializers.CharField(source="get_module_display", read_only=True)
     is_admin = serializers.BooleanField(read_only=True)
+    is_director = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = User
@@ -19,7 +21,10 @@ class UserSerializer(serializers.ModelSerializer):
             "email",
             "role",
             "role_display",
+            "module",
+            "module_display",
             "is_admin",
+            "is_director",
             "is_active",
         )
 
@@ -37,8 +42,23 @@ class UserCreateSerializer(serializers.ModelSerializer):
             "last_name",
             "email",
             "role",
+            "module",
             "password",
         )
+
+    def validate(self, attrs):
+        # Направление обязательно для директора и игнорируется (очищается) у всех
+        # остальных ролей — чтобы менеджер/админ случайно не оказались «привязаны».
+        role = attrs.get("role", getattr(self.instance, "role", None))
+        if role == User.Role.DIRECTOR:
+            module = attrs.get("module", getattr(self.instance, "module", None))
+            if not module:
+                raise serializers.ValidationError(
+                    {"module": "Укажите направление директора (Express или Business)."}
+                )
+        else:
+            attrs["module"] = None
+        return attrs
 
     def create(self, validated_data):
         password = validated_data.pop("password", None)

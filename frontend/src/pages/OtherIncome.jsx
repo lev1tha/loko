@@ -5,22 +5,29 @@ import { firstOfMonth, today, money, dateRu } from '../lib/format'
 import { Alert, EmptyState, Field, Modal, Spinner } from '../components/ui'
 import { IconPlus, IconTrash } from '../components/icons'
 
-// Прочий доход — не от карго-продаж и не депозит (возмещения, услуги и т.п.).
-// Входит в выручку ОПиУ без расчётной себестоимости 55% и в приток ОДДС.
-export default function OtherIncome() {
+// Прочий доход / Поступление — не от карго-продаж и не депозит (возмещения,
+// услуги и т.п.). Входит в выручку ОПиУ без расчётной себестоимости 55% и в
+// приток ОДДС. В Business тот же механизм называется «Поступление».
+export default function OtherIncome({ lockedModule = null }) {
+  const isBiz = lockedModule === 'BUSINESS'
+  const noun = isBiz ? 'Поступление' : 'Прочий доход'
+
   const [from, setFrom] = useState(firstOfMonth())
   const [to, setTo] = useState(today())
   const [form, setForm] = useState(null)
   const [busyId, setBusyId] = useState(null)
   const [error, setError] = useState('')
 
-  const items = useFetch('/other-income/', { from, to, page_size: 10000 })
-  const accounts = useFetch('/accounts/', { page_size: 10000 })
+  // В разделах Express/Business направление зафиксировано (проп lockedModule):
+  // и список, и счета формы — только этого направления.
+  const moduleParam = lockedModule ? { module: lockedModule } : {}
+  const items = useFetch('/other-income/', { from, to, page_size: 10000, ...moduleParam })
+  const accounts = useFetch('/accounts/', { page_size: 10000, ...moduleParam })
   const rows = asList(items.data)
   const totalKgs = rows.reduce((a, r) => a + Number(r.amount_kgs || 0), 0)
 
   async function remove(r) {
-    if (!window.confirm(`Удалить прочий доход на ${money(r.amount)}?`)) return
+    if (!window.confirm(`Удалить ${noun.toLowerCase()} на ${money(r.amount)}?`)) return
     setBusyId(r.id)
     setError('')
     try {
@@ -47,11 +54,13 @@ export default function OtherIncome() {
             </Field>
           </div>
           <button className="btn btn-primary" onClick={() => setForm('new')}>
-            <IconPlus size={18} /> Прочий доход
+            <IconPlus size={18} /> {noun}
           </button>
         </div>
         <p className="caption" style={{ margin: '0 0 12px', lineHeight: 1.5 }}>
-          Доходы не от карго-продаж (возмещения, услуги и т.п.). Входят в выручку без расчётной себестоимости 55% и в приток ОДДС.
+          {isBiz
+            ? 'Поступления на счёт не от закупа (возмещения, услуги, прочие доходы). Входят в выручку ОПиУ и в приток ОДДС.'
+            : 'Доходы не от карго-продаж (возмещения, услуги и т.п.). Входят в выручку без расчётной себестоимости 55% и в приток ОДДС.'}
         </p>
         {!items.loading && rows.length > 0 && (
           <div className="caption" style={{ marginBottom: 8 }}>Всего {rows.length} · {money(totalKgs)}</div>
@@ -59,7 +68,7 @@ export default function OtherIncome() {
         {items.loading ? (
           <Spinner />
         ) : rows.length === 0 ? (
-          <EmptyState>Прочих доходов за период нет.</EmptyState>
+          <EmptyState>{isBiz ? 'Поступлений' : 'Прочих доходов'} за период нет.</EmptyState>
         ) : (
           <div className="table-wrap">
             <table className="table">
@@ -92,6 +101,8 @@ export default function OtherIncome() {
       {form && (
         <OtherIncomeForm
           accounts={asList(accounts.data)}
+          noun={noun}
+          showModule={!lockedModule}
           onClose={() => setForm(null)}
           onSaved={() => { setForm(null); items.reload() }}
         />
@@ -100,7 +111,7 @@ export default function OtherIncome() {
   )
 }
 
-function OtherIncomeForm({ accounts, onClose, onSaved }) {
+function OtherIncomeForm({ accounts, noun = 'Прочий доход', showModule = true, onClose, onSaved }) {
   const [accountId, setAccountId] = useState(accounts[0]?.id || '')
   const [amount, setAmount] = useState('')
   const [description, setDescription] = useState('')
@@ -124,7 +135,7 @@ function OtherIncomeForm({ accounts, onClose, onSaved }) {
 
   return (
     <Modal
-      title="Прочий доход"
+      title={noun}
       onClose={onClose}
       footer={
         <>
@@ -140,7 +151,9 @@ function OtherIncomeForm({ accounts, onClose, onSaved }) {
         <Field label="Счёт зачисления">
           <select className="select" value={accountId} onChange={(e) => setAccountId(e.target.value)} required>
             {accounts.map((a) => (
-              <option key={a.id} value={a.id}>{a.name} · {a.currency} ({a.module === 'BUSINESS' ? 'Business' : 'Express'})</option>
+              <option key={a.id} value={a.id}>
+                {a.name} · {a.currency}{showModule ? ` (${a.module === 'BUSINESS' ? 'Business' : 'Express'})` : ''}
+              </option>
             ))}
           </select>
         </Field>

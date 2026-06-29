@@ -46,10 +46,10 @@ export function EmptyState({ children }) {
   return <div className="empty">{children}</div>
 }
 
-export function Modal({ title, onClose, children, footer }) {
+export function Modal({ title, onClose, children, footer, wide }) {
   return (
     <div className="modal-overlay" onMouseDown={onClose}>
-      <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
+      <div className={`modal ${wide ? 'modal-wide' : ''}`} onMouseDown={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <h3 className="card-title">{title}</h3>
           <button className="btn btn-icon btn-ghost" onClick={onClose} aria-label="Закрыть">

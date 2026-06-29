@@ -6,9 +6,11 @@ import { Alert, Field, Segmented } from '../components/ui'
 import { LoadingTruck } from '../components/states'
 import { IconPlus } from '../components/icons'
 
+// «Прямая сумма» — первой и по умолчанию (основной режим для сотрудников),
+// «По весу» — вторым.
 const MODES = [
-  { value: 'WEIGHT', label: 'По весу' },
   { value: 'DIRECT', label: 'Прямая сумма' },
+  { value: 'WEIGHT', label: 'По весу' },
 ]
 
 // Страница роли «Сотрудник»: только добавление продажи в Loko Express.
@@ -20,7 +22,7 @@ export default function OperatorSale() {
   const accountsReq = useFetch('/sales/accounts/')
   const accounts = asList(accountsReq.data)
 
-  const [mode, setMode] = useState('WEIGHT')
+  const [mode, setMode] = useState('DIRECT')
   const [clientCode, setClientCode] = useState('')
   const [weight, setWeight] = useState('')
   const [directAmount, setDirectAmount] = useState('')

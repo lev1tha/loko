@@ -42,6 +42,9 @@
 .brand-text span { font-size: 11px; color: var(--muted); }
 
 .nav { padding: var(--s-md) var(--s-sm); display: flex; flex-direction: column; gap: 2px; overflow-y: auto; flex: 1; }
+/* В навигационной панели скроллбар прячем полностью (скролл остаётся). */
+.nav { scrollbar-width: none; -ms-overflow-style: none; }
+.nav::-webkit-scrollbar { width: 0; height: 0; display: none; }
 .nav-item {
   display: flex;
   align-items: center;

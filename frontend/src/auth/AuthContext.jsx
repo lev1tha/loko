@@ -45,6 +45,9 @@ export function AuthProvider({ children }) {
     isAdmin: !!user?.is_admin,
     // «Сотрудник» — только добавление продаж Express, без доступа к финансам.
     isOperator: user?.role === 'OPERATOR',
+    // «Директор» — только просмотр ОПиУ/ОДДС своего направления (read-only).
+    isDirector: user?.role === 'DIRECTOR',
+    directorModule: user?.role === 'DIRECTOR' ? user?.module || null : null,
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
