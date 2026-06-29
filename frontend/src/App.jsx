@@ -76,15 +76,20 @@ function AppRoutes() {
         {/* Loko Express */}
         <Route path="sales" element={<Sales />} />
         <Route path="express/other-income" element={<OtherIncome />} />
+        <Route path="express/expenses" element={<Expenses lockedModule="EXPRESS" />} />
+        <Route path="express/transfers" element={<Transfers module="EXPRESS" />} />
         <Route path="express/accounts" element={<Accounts module="EXPRESS" />} />
+        <Route path="express/reports" element={<Reports lockedModule="EXPRESS" />} />
 
         {/* Loko Business */}
         <Route path="business/accounts" element={<Accounts module="BUSINESS" />} />
         <Route path="business/orders" element={<BusinessOrders />} />
         <Route path="business/transfers" element={<Transfers module="BUSINESS" />} />
         <Route path="business/deposits" element={<Deposits />} />
+        <Route path="business/expenses" element={<Expenses lockedModule="BUSINESS" />} />
         <Route path="business/debts" element={<Debts />} />
         <Route path="business/calculator" element={<Calculator />} />
+        <Route path="business/reports" element={<Reports lockedModule="BUSINESS" />} />
 
         {/* Финансы */}
         <Route path="expenses" element={<Expenses />} />

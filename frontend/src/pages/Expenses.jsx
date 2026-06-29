@@ -55,14 +55,18 @@ const CAT_HINT = {
   FINANCING: 'Финансовая деятельность (ОДДС): кредиты/проценты',
 }
 
-export default function Expenses() {
+export default function Expenses({ lockedModule = null }) {
   const [from, setFrom] = useState(firstOfMonth())
   const [to, setTo] = useState(today())
   const [category, setCategory] = useState('')
-  const [module, setModule] = useState('all')
+  const [moduleState, setModule] = useState('all')
   const [form, setForm] = useState(null) // null | 'new' | объект расхода
   const [busyId, setBusyId] = useState(null)
   const [error, setError] = useState('')
+
+  // В разделах Express/Business направление зафиксировано (проп lockedModule):
+  // переключатель «Направление» скрыт, счета и список — только этого направления.
+  const module = lockedModule || moduleState
 
   const params = {
     from,
@@ -72,7 +76,7 @@ export default function Expenses() {
     page_size: PAGE_SIZE,
   }
   const expenses = useFetch('/expenses/', params)
-  const accounts = useFetch('/accounts/', { page_size: PAGE_SIZE })
+  const accounts = useFetch('/accounts/', lockedModule ? { module: lockedModule, page_size: PAGE_SIZE } : { page_size: PAGE_SIZE })
   const rows = asList(expenses.data)
   const total = expenses.data?.count ?? rows.length
   // Итоги в сомах. Делим расходы на влияющие на прибыль (себест. + опер. + прочие)
@@ -116,10 +120,12 @@ export default function Expenses() {
                 ))}
               </select>
             </Field>
-            <div className="field">
-              <span className="field-label">Направление</span>
-              <Segmented value={module} onChange={setModule} options={MODULES} />
-            </div>
+            {!lockedModule && (
+              <div className="field">
+                <span className="field-label">Направление</span>
+                <Segmented value={module} onChange={setModule} options={MODULES} />
+              </div>
+            )}
           </div>
           <button className="btn btn-primary" onClick={() => setForm('new')}>
             <IconPlus size={18} /> Новый расход

@@ -30,23 +30,26 @@ const MONTHLY_ROWS = {
     ['tax', 'Единый налог', true], ['net_profit', 'Чистая прибыль'],
   ],
   cashflow: [
-    ['operating_inflow', 'Операционный приток'], ['net_operating', 'Чистый операционный'],
-    ['net_investing', 'Инвестиционная'], ['net_financing', 'Финансовая'],
+    ['operating_inflow', 'Денежные потоки'], ['net_operating', 'Итого операционной'],
+    ['net_investing', 'Итого инвестиционной'], ['net_financing', 'Итого финансовой'],
     ['net_cash_flow', 'Чистое изменение'], ['closing_balance', 'Остаток на конец'],
   ],
 }
 
-export default function Reports() {
+export default function Reports({ lockedModule = null }) {
   const [from, setFrom] = useState(firstOfMonth())
   const [to, setTo] = useState(today())
   const [payment, setPayment] = useState('all')
   const [report, setReport] = useState('pnl')
-  const [module, setModule] = useState('all')
+  const [moduleState, setModule] = useState('all')
   const [taxRate, setTaxRate] = useState('')
   const [opening, setOpening] = useState('')
   const [view, setView] = useState('period') // 'period' | 'monthly'
   const [drill, setDrill] = useState(null) // { line, label, basis }
 
+  // На страницах внутри разделов Express/Business направление зафиксировано
+  // (проп lockedModule) — переключатель «Направление» скрыт.
+  const module = lockedModule || moduleState
   const moduleParam = module !== 'all' ? { module } : {}
   const pnlParams = { from, to, payment, ...moduleParam, ...(taxRate !== '' ? { tax_rate: taxRate } : {}) }
   const pnl = useFetch('/reports/pnl/', pnlParams)
@@ -65,10 +68,12 @@ export default function Reports() {
           <Field label="По дату">
             <input className="input" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
           </Field>
-          <div className="field">
-            <span className="field-label">Направление</span>
-            <Segmented value={module} onChange={setModule} options={MODULES} />
-          </div>
+          {!lockedModule && (
+            <div className="field">
+              <span className="field-label">Направление</span>
+              <Segmented value={module} onChange={setModule} options={MODULES} />
+            </div>
+          )}
           <div className="field">
             <span className="field-label">Расчёт</span>
             <Segmented value={payment} onChange={setPayment} options={PAYMENTS} />
@@ -107,7 +112,7 @@ export default function Reports() {
       ) : cash.loading ? (
         <Spinner />
       ) : (
-        <CashFlow data={cash.data} onDrill={openDrill('cash')} />
+        <CashFlow data={cash.data} onDrill={openDrill('accrual')} />
       )}
 
       {drill && (
@@ -173,7 +178,7 @@ function Line({ label, value, strong, sub, level, sign, indent, lineKey, onDrill
   const cls = sign === 'minus' ? 'neg' : sign === 'plus' ? 'pos' : signClass(value)
   const prefix = sign === 'minus' ? '−' : sign === 'plus' ? '+' : ''
   const showValue = value !== null && value !== undefined
-  const drillable = lineKey && onDrill && Number(value)
+  const drillable = !!(lineKey && onDrill && Number(value))
   return (
     <tr
       className={`${level ? 'pnl-level' : ''} ${drillable ? 'drillable' : ''}`}
@@ -264,23 +269,19 @@ function CashFlow({ data, onDrill }) {
         <span className="card-title">Отчёт о движении денежных средств (ОДДС)</span>
       </div>
       <p className="caption" style={{ margin: '0 0 12px', lineHeight: 1.5 }}>
-        Сколько денег реально пришло и ушло (по дате оплаты). Показывает остаток на начало и конец периода.
+        Движение по трём видам деятельности. Операционная берётся из ОПиУ (выручка − себестоимость − операционные расходы).
+        Остаток на конец = остаток на начало + чистый поток.
       </p>
       <div className="table-wrap">
         <table className="table" style={{ minWidth: 0 }}>
           <tbody>
-            <Line label="Остаток денег на начало" value={d.opening_balance} strong level sub={d.opening_manual ? 'введён вручную' : undefined} />
-            <Line label="Операционный приток" value={d.operating_inflow} sign="plus" lineKey="inflow" onDrill={onDrill} />
-            <Line label="Продажи Loko Express (оплата)" value={d.express_inflow} sign="plus" indent lineKey="express_revenue" onDrill={onDrill} />
-            <Line label="Принятые депозиты (Business)" value={d.deposits_inflow} sign="plus" indent lineKey="deposit_revenue" onDrill={onDrill} />
-            {Number(d.other_income_inflow) !== 0 && <Line label="Прочий доход" value={d.other_income_inflow} sign="plus" indent />}
-            <Line label="Операционный отток" value={d.operating_outflow} sign="minus" />
-            <Line label="OpEx" value={d.opex} sign="minus" indent lineKey="opex" onDrill={onDrill} />
-            <Line label="Закуп товара (себест.)" value={d.cogs_paid} sign="minus" indent lineKey="cogs" onDrill={onDrill} />
-            <Line label="Поставщики / авансы" value={d.supplier_payments} sign="minus" indent lineKey="supplier" onDrill={onDrill} />
-            <Line label="Прочее (неоперац.)" value={d.other_outflow} sign="minus" indent lineKey="other" onDrill={onDrill} />
-            <Line label="Чистый операционный ДДС" value={d.net_operating} strong level />
-            <Line label="Инвестиционная деятельность" value={d.net_investing} strong level />
+            <Line label="Остаток денег на начало" value={d.opening_balance} strong level sub={d.opening_manual ? 'введён вручную' : 'перенос с прошлого периода'} />
+            <Line label="Операционная деятельность" strong />
+            <Line label="Денежные потоки от деятельности" value={d.operating_inflow} sign="plus" indent lineKey="revenue" onDrill={onDrill} />
+            <Line label="Расходы на себестоимость продукции" value={d.cogs} sign="minus" indent lineKey="cogs" onDrill={onDrill} />
+            <Line label="Операционные расходы" value={d.operating_expenses} sign="minus" indent lineKey="opex" onDrill={onDrill} />
+            <Line label="Итого от операционной деятельности" value={d.net_operating} strong level />
+            <Line label="Инвестиционная деятельность" strong />
             {Object.keys(d.investing_articles || {}).length ? (
               Object.entries(d.investing_articles).map(([k, a]) => (
                 <Line key={k} label={a.label} sub={a.count ? `${a.count} опер.` : null} value={a.amount} sign="minus" indent />
@@ -288,29 +289,21 @@ function CashFlow({ data, onDrill }) {
             ) : (
               <Line label="Приобретение основных средств" value={d.investing_outflow} sign="minus" indent lineKey="invest" onDrill={onDrill} />
             )}
-            <Line label="Финансовая деятельность" value={d.net_financing} strong level />
+            <Line label="Итого от инвестиционной деятельности" value={d.net_investing} strong level />
+            <Line label="Финансовая деятельность" strong />
             <Line label="Изъятие собственника" value={d.owner_withdrawals} sign="minus" indent lineKey="owner" onDrill={onDrill} />
-            {Object.keys(d.financing_articles || {}).length ? (
-              Object.entries(d.financing_articles).map(([k, a]) => (
-                <Line key={k} label={a.label} sub={a.count ? `${a.count} опер.` : null} value={a.amount} sign="minus" indent />
-              ))
-            ) : (
-              <Line label="Займы / прочее финансовое" value={d.financing_other} sign="minus" indent lineKey="financing" onDrill={onDrill} />
-            )}
-            {Number(d.net_transfers || 0) !== 0 && (
-              <>
-                <Line label="Переводы и конвертации" value={d.net_transfers} strong level />
-                <Line label="Поступило переводами" value={d.transfers_in} indent />
-                <Line label="Ушло переводами" value={d.transfers_out} sign="minus" indent />
-              </>
-            )}
+            {Object.entries(d.financing_articles || {}).map(([k, a]) => (
+              <Line key={k} label={a.label} sub={a.count ? `${a.count} опер.` : null} value={a.amount} sign="minus" indent />
+            ))}
+            <Line label="Выплата налога на прибыль" value={d.profit_tax} sign="minus" indent />
+            <Line label="Итого от финансовой деятельности" value={d.net_financing} strong level />
             <Line label="Чистое изменение денег" value={d.net_cash_flow} strong level />
             <Line label="Остаток денег на конец" value={d.closing_balance} strong level />
           </tbody>
         </table>
       </div>
       <p className="caption mt-lg">
-        Приходных операций: {ops.income ?? 0}, расходных: {ops.expense ?? 0}. ОДДС по «дате оплаты».
+        Операционная деятельность повторяет ОПиУ; «Выплата налога на прибыль» = единый налог из ОПиУ.
         Нажмите на строку со знаком «›» — увидите операции за ней.
       </p>
 

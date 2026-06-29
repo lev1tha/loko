@@ -1,8 +1,11 @@
 """Financial reporting engine for Loko (Express + Business).
 
-Accrual vs. cash separation (как в реальном учёте Локо):
-  * ОПиУ (P&L)       — по НАЧИСЛЕНИЮ, по «дате операции» (Sale.date / Expense.date).
-  * ОДДС (Cash Flow) — по ОПЛАТЕ, по «дате оплаты» (Sale.payment_date / Expense.payment_date).
+Отчёты Локо (по документу-спецификации):
+  * ОПиУ (P&L)  — по НАЧИСЛЕНИЮ, по «дате операции» (Sale.date / Expense.date).
+  * ОДДС (Cash Flow) — пересказ ОПиУ по трём видам деятельности (операционная из
+    ОПиУ; инвестиционная — приобретение ОС/ремонт/склад; финансовая — изъятие
+    собственника + кредиты + выплата налога на прибыль). Остаток на начало — ручной
+    перенос, конец = начало + чистый поток. См. build_cashflow.
 
 All amounts are consolidated into KGS (сом); CNY → KGS by AppSettings.cny_to_kgs_rate.
 """
@@ -106,13 +109,14 @@ def _expense_paid(date_from, date_to, kinds, category=None, module=None, article
     return _sum_kgs(qs, "paid_amount"), qs.count()
 
 
-def _cash_articles(date_from, date_to, kinds, category, article_set, module):
-    """Разбивка оплат по статьям внутри категории (для разделов ОДДС). Только ненулевые."""
+def _accrual_articles(date_from, date_to, kinds, category, article_set, module):
+    """Разбивка по статьям внутри категории ПО НАЧИСЛЕНИЮ (для разделов ОДДС, который
+    по документу-спецификации повторяет ОПиУ). Только ненулевые."""
     out = {}
     for art in OpexArticle:
         if art not in article_set:
             continue
-        amt, cnt = _expense_paid(date_from, date_to, kinds, category, module, article=art.value)
+        amt, cnt = _expense_accrual(date_from, date_to, kinds, category, art.value, module)
         if amt:
             out[art.value] = {"label": art.label, "amount": amt, "count": cnt}
     return out
@@ -128,17 +132,6 @@ def _recognized_deposits(date_from, date_to, kinds, module=None):
         Deposit.objects.filter(status=Deposit.Status.RECOGNIZED, account__kind__in=kinds), module
     )
     qs = _between(qs, date_from, date_to, "recognized_date")
-    total = ZERO
-    for row in qs.values("currency", "kgs_rate").annotate(s=Sum("amount")):
-        total += kgs_of(row["s"] or ZERO, row["currency"], row["kgs_rate"])
-    return total, qs.count()
-
-
-def _deposits_received(date_from, date_to, kinds, module=None):
-    from business.models import Deposit
-
-    qs = _by_module(Deposit.objects.filter(account__kind__in=kinds), module)
-    qs = _between(qs, date_from, date_to, "date")
     total = ZERO
     for row in qs.values("currency", "kgs_rate").annotate(s=Sum("amount")):
         total += kgs_of(row["s"] or ZERO, row["currency"], row["kgs_rate"])
@@ -330,79 +323,50 @@ def _consolidated_cash(upper_date, inclusive, module=None, kinds=None):
     return total
 
 
-def _transfer_flows(date_from, date_to, module, kinds):
-    """Притоки/оттоки от переводов и конвертаций для счетов выбранного среза
-    (направление + тип счёта), в сомах по снапшот-курсам ног перевода."""
-    from .models import Transfer
-
-    accs = Account.objects.all()
-    if module:
-        accs = accs.filter(module=module)
-    if kinds:
-        accs = accs.filter(kind__in=kinds)
-    acc_ids = set(accs.values_list("id", flat=True))
-    tin = tout = ZERO
-    trs = _between(
-        Transfer.objects.select_related("from_account", "to_account"), date_from, date_to, "date"
-    )
-    for t in trs:
-        if t.to_account_id in acc_ids:
-            tin += t.kgs_in
-        if t.from_account_id in acc_ids:
-            tout += t.kgs_out
-    return tin, tout
-
-
 # ===========================================================================
-# ОДДС (Cash Flow) — по оплате
+# ОДДС (Cash Flow) — пересказ ОПиУ по видам деятельности (документ-спецификация)
 # ===========================================================================
 def build_cashflow(date_from=None, date_to=None, payment="all", module=None, opening_override=None):
+    """ОДДС по документу-спецификации: пересказ ОПиУ по трём видам деятельности
+    (а НЕ кассовый отчёт по оплате). Решение пользователя 2026-06-29 — операционный
+    раздел берёт цифры из ОПиУ, налог на прибыль показан в финансовой деятельности.
+
+    Формула (как в образце документа): Итого опер. + Итого инвест. + Итого фин.
+    = чистый поток; конец = начало (ручной/перенос) + чистый поток.
+    """
     kinds = _kinds_for_payment(payment)
 
-    sales = _sales(date_from, date_to, kinds, "payment_date", module)
-    express_inflow = sales.aggregate(s=Sum("paid_som"))["s"] or ZERO
-    deposits_inflow, deposits_count = _deposits_received(date_from, date_to, kinds, module)
-    other_income_inflow, other_income_cnt = _other_income(date_from, date_to, kinds, module)
-    operating_inflow = express_inflow + deposits_inflow + other_income_inflow
+    # --- Операционная деятельность: берётся из ОПиУ ------------------------
+    pnl = build_pnl(date_from, date_to, payment, module=module)
+    revenue = pnl["revenue"]                  # «Денежные потоки от деятельности»
+    cogs = pnl["cogs"]                        # «Расходы на себестоимость продукции» (55%)
+    operating_expenses = pnl["operating_expenses"]
+    net_operating = pnl["operating_profit"]   # = выручка − себест − опер.расходы
+    profit_tax = pnl["tax"]                   # «Выплата налога на прибыль» (фин. деят.)
 
-    opex, opex_cnt = _expense_paid(date_from, date_to, kinds, ExpenseCategory.OPEX, module)
-    cogs_paid, cogs_cnt = _expense_paid(date_from, date_to, kinds, ExpenseCategory.COGS, module)
-    supplier, sup_cnt = _expense_paid(date_from, date_to, kinds, ExpenseCategory.SUPPLIER, module)
-    other, other_cnt = _expense_paid(date_from, date_to, kinds, ExpenseCategory.OTHER, module)
-    owner, owner_cnt = _expense_paid(date_from, date_to, kinds, ExpenseCategory.OWNER, module)
-    invest, inv_cnt = _expense_paid(date_from, date_to, kinds, ExpenseCategory.INVEST, module)
-    financing_exp, fin_cnt = _expense_paid(date_from, date_to, kinds, ExpenseCategory.FINANCING, module)
+    # --- Инвестиционная деятельность (приобретение ОС/ремонт/склад) --------
+    invest_total, inv_cnt = _expense_accrual(date_from, date_to, kinds, ExpenseCategory.INVEST, module=module)
+    investing_articles = _accrual_articles(date_from, date_to, kinds, ExpenseCategory.INVEST, INVESTING_ARTICLES, module)
+    net_investing = -invest_total
 
-    # Операционная деятельность
-    operating_outflow = opex + cogs_paid + supplier + other
-    net_operating = operating_inflow - operating_outflow
-    # Инвестиционная деятельность (отток на оборудование/активы)
-    investing_outflow = invest
-    net_investing = -investing_outflow
-    # Финансовая деятельность (изъятие собственника + кредиты/проценты)
-    financing_outflow = owner + financing_exp
+    # --- Финансовая деятельность (изъятие собственника + кредиты + налог) --
+    owner, owner_cnt = _expense_accrual(date_from, date_to, kinds, ExpenseCategory.OWNER, module=module)
+    financing_exp, fin_cnt = _expense_accrual(date_from, date_to, kinds, ExpenseCategory.FINANCING, module=module)
+    financing_articles = _accrual_articles(date_from, date_to, kinds, ExpenseCategory.FINANCING, FINANCING_ARTICLES, module)
+    financing_outflow = owner + financing_exp + profit_tax
     net_financing = -financing_outflow
-    # Детализация по статьям (для строк раздела, как в образце документа).
-    investing_articles = _cash_articles(date_from, date_to, kinds, ExpenseCategory.INVEST, INVESTING_ARTICLES, module)
-    financing_articles = _cash_articles(date_from, date_to, kinds, ExpenseCategory.FINANCING, FINANCING_ARTICLES, module)
-    # Переводы/конвертации внутри выбранного среза — нужны, чтобы ОДДС сходился
-    # (opening + net = closing): перемещения меняют остаток счёта/канала, а на
-    # уровне «всё» дают курсовую разницу обменов. Считаем по снапшот-курсам ног.
-    transfers_in, transfers_out = _transfer_flows(date_from, date_to, module, kinds)
-    net_transfers = transfers_in - transfers_out
-    total_outflow = operating_outflow + investing_outflow + financing_outflow
-    net_cash_flow = net_operating + net_investing + net_financing + net_transfers
 
-    # Остаток на начало: вручную (как просит документ — напр. перенос с прошлого
-    # месяца) либо авто из истории. При ручном — конец = начало + чистый поток.
+    net_cash_flow = net_operating + net_investing + net_financing
+
+    # Остаток на начало: вручную (перенос «чистого потока прошлого месяца») либо
+    # авто из истории. Конец = начало + чистый поток (формула документа).
     if opening_override is not None:
         opening = opening_override
-        closing = opening + net_cash_flow
     else:
         opening = _consolidated_cash(date_from, inclusive=False, module=module, kinds=kinds)
-        closing = _consolidated_cash(date_to, inclusive=True, module=module, kinds=kinds)
+    closing = opening + net_cash_flow
 
-    expense_count = opex_cnt + cogs_cnt + sup_cnt + other_cnt + owner_cnt + inv_cnt + fin_cnt
+    expense_count = pnl["opex_count"] + inv_cnt + owner_cnt + fin_cnt
 
     return {
         "report": "CASHFLOW",
@@ -410,32 +374,26 @@ def build_cashflow(date_from=None, date_to=None, payment="all", module=None, ope
         "payment": payment,
         "opening_balance": opening,
         "opening_manual": opening_override is not None,
-        "express_inflow": express_inflow,
-        "deposits_inflow": deposits_inflow,
-        "other_income_inflow": other_income_inflow,
-        "operating_inflow": operating_inflow,
-        "opex": opex,
-        "cogs_paid": cogs_paid,
-        "supplier_payments": supplier,
-        "other_outflow": other,
-        "operating_outflow": operating_outflow,
+        # Операционная (из ОПиУ)
+        "operating_inflow": revenue,
+        "cogs": cogs,
+        "operating_expenses": operating_expenses,
         "net_operating": net_operating,
-        "investing_outflow": investing_outflow,
+        # Инвестиционная
+        "investing_outflow": invest_total,
         "net_investing": net_investing,
         "investing_articles": investing_articles,
+        # Финансовая
         "owner_withdrawals": owner,
         "financing_other": financing_exp,
+        "profit_tax": profit_tax,
         "financing_outflow": financing_outflow,
         "net_financing": net_financing,
         "financing_articles": financing_articles,
-        "transfers_in": transfers_in,
-        "transfers_out": transfers_out,
-        "net_transfers": net_transfers,
-        "total_outflow": total_outflow,
         "net_cash_flow": net_cash_flow,
         "closing_balance": closing,
         "payment_breakdown": _payment_breakdown(date_from, date_to, module),
-        "operations": {"income": sales.count() + deposits_count + other_income_cnt, "expense": expense_count},
+        "operations": {"income": pnl["operations"]["income"], "expense": expense_count},
     }
 
 
