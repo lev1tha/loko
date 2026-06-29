@@ -1,12 +1,16 @@
 from rest_framework import serializers
 
-from .models import Sale
+from .models import ClientPrice, Sale
 
 
 class SaleSerializer(serializers.ModelSerializer):
     account_name = serializers.CharField(source="account.name", read_only=True)
     is_cash = serializers.BooleanField(read_only=True)
     receivable_som = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
+    # Расчётный («предположительный») вес — для показа админу, в т.ч. в «прямой сумме».
+    est_weight_kg = serializers.DecimalField(
+        max_digits=12, decimal_places=2, read_only=True, allow_null=True
+    )
     amount_mode_display = serializers.CharField(source="get_amount_mode_display", read_only=True)
 
     class Meta:
@@ -17,6 +21,7 @@ class SaleSerializer(serializers.ModelSerializer):
             "amount_mode",
             "amount_mode_display",
             "weight_kg",
+            "est_weight_kg",
             "places",
             "account",
             "account_name",
@@ -41,6 +46,7 @@ class SaleSerializer(serializers.ModelSerializer):
             "usd_rate_som",
             "cost_per_kg_som",
             "margin_som",
+            "est_weight_kg",
             "created_at",
         )
         extra_kwargs = {
@@ -132,3 +138,21 @@ class OperatorSaleSerializer(SaleSerializer):
             "payment_date": {"required": False},
             "weight_kg": {"required": False},
         }
+
+
+class ClientPriceSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ClientPrice
+        fields = ("id", "client_code", "price_per_kg_som", "note", "updated_at")
+        read_only_fields = ("updated_at",)
+
+    def validate_client_code(self, value):
+        value = (value or "").strip()
+        if not value:
+            raise serializers.ValidationError("Укажите код клиента.")
+        return value
+
+    def validate_price_per_kg_som(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("Цена за кг должна быть больше нуля.")
+        return value

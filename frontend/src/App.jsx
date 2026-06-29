@@ -10,6 +10,7 @@ import NotFound from './pages/NotFound'
 import Dashboard from './pages/Dashboard'
 import Control from './pages/Control'
 import Sales from './pages/Sales'
+import ClientPrices from './pages/ClientPrices'
 import OtherIncome from './pages/OtherIncome'
 import OperatorSale from './pages/OperatorSale'
 import Expenses from './pages/Expenses'
@@ -23,6 +24,7 @@ import Calculator from './pages/Calculator'
 import Reports from './pages/Reports'
 import Settings from './pages/Settings'
 import Users from './pages/Users'
+import Guide from './pages/Guide'
 
 export default function App() {
   return (
@@ -97,6 +99,7 @@ function AppRoutes() {
 
         {/* Loko Express */}
         <Route path="sales" element={<Sales />} />
+        <Route path="express/client-prices" element={<ClientPrices />} />
         <Route path="express/other-income" element={<OtherIncome lockedModule="EXPRESS" />} />
         <Route path="express/expenses" element={<Expenses lockedModule="EXPRESS" />} />
         <Route path="express/transfers" element={<Transfers module="EXPRESS" />} />
@@ -136,6 +139,14 @@ function AppRoutes() {
           element={
             <ProtectedRoute adminOnly>
               <Users />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="guide"
+          element={
+            <ProtectedRoute adminOnly>
+              <Guide />
             </ProtectedRoute>
           }
         />

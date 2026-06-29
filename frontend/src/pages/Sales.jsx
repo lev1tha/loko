@@ -1,9 +1,23 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import api, { errorMessage } from '../api/client'
 import { useFetch, asList } from '../lib/hooks'
 import { firstOfMonth, today, som, kg, dateRu, signClass } from '../lib/format'
 import { Alert, Badge, EmptyState, Field, Modal, Segmented, Spinner, Stat } from '../components/ui'
 import { IconPlus, IconEdit, IconTrash } from '../components/icons'
+import { compareRows } from '../lib/sales'
+
+// Заголовок-кнопка для сортировки таблицы продаж.
+function Th({ label, sortKey, sort, onSort, num }) {
+  const active = sort.key === sortKey
+  return (
+    <th className={num ? 'num' : undefined}>
+      <button type="button" className={`th-sort ${active ? 'active' : ''}`} onClick={() => onSort(sortKey)}>
+        {label}
+        <span className="th-arrow">{active ? (sort.dir === 'asc' ? '↑' : '↓') : ''}</span>
+      </button>
+    </th>
+  )
+}
 
 const PAYMENTS = [
   { value: 'all', label: 'Все' },
@@ -34,6 +48,16 @@ export default function Sales() {
   const rows = asList(sales.data)
   const total = sales.data?.count ?? rows.length
   const s = summary.data || {}
+
+  // Сортировка по клику на заголовок (по умолчанию — дата по убыванию, как с сервера).
+  const [sort, setSort] = useState({ key: 'date', dir: 'desc' })
+  const toggleSort = (key) =>
+    setSort((p) => (p.key === key ? { key, dir: p.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }))
+  const sortedRows = useMemo(() => {
+    const arr = [...rows]
+    arr.sort((a, b) => compareRows(a, b, sort.key, sort.dir))
+    return arr
+  }, [rows, sort])
 
   function refresh() {
     sales.reload()
@@ -123,23 +147,29 @@ export default function Sales() {
             <table className="table">
               <thead>
                 <tr>
-                  <th>Дата</th>
-                  <th>Код клиента</th>
-                  <th className="num">Вес</th>
-                  <th>Счёт</th>
-                  <th className="num">Начислено</th>
-                  <th className="num">Оплачено</th>
-                  <th className="num">Дебиторка</th>
-                  <th className="num">Маржа</th>
+                  <Th label="Дата" sortKey="date" sort={sort} onSort={toggleSort} />
+                  <Th label="Код клиента" sortKey="client_code" sort={sort} onSort={toggleSort} />
+                  <Th label="Вес" sortKey="weight" sort={sort} onSort={toggleSort} num />
+                  <Th label="Счёт" sortKey="account" sort={sort} onSort={toggleSort} />
+                  <Th label="Начислено" sortKey="price_som" sort={sort} onSort={toggleSort} num />
+                  <Th label="Оплачено" sortKey="paid_som" sort={sort} onSort={toggleSort} num />
+                  <Th label="Дебиторка" sortKey="receivable_som" sort={sort} onSort={toggleSort} num />
+                  <Th label="Маржа" sortKey="margin_som" sort={sort} onSort={toggleSort} num />
                   <th></th>
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r) => (
+                {sortedRows.map((r) => (
                   <tr key={r.id}>
                     <td>{dateRu(r.date)}</td>
                     <td><strong>{r.client_code}</strong></td>
-                    <td className="num">{r.weight_kg ? kg(r.weight_kg) : '—'}</td>
+                    <td className="num">
+                      {r.weight_kg
+                        ? kg(r.weight_kg)
+                        : r.est_weight_kg
+                          ? <span title="Расчётный вес из суммы">≈ {kg(r.est_weight_kg)}</span>
+                          : '—'}
+                    </td>
                     <td>
                       <Badge variant={r.is_cash ? 'badge-cash' : 'badge-bank'}>{r.account_name}</Badge>
                     </td>
@@ -217,8 +247,38 @@ function SaleForm({ editing, accounts, onClose, onSaved }) {
   const [perKgRate, setPerKgRate] = useState(0) // цена 1 кг (сом) из настроек — для пересчёта суммы → вес
   const [perKgInput, setPerKgInput] = useState('') // индивидуальная цена за кг (сом); пусто = из настроек
   const [costPerKg, setCostPerKg] = useState(0) // себестоимость 1 кг (сом) — для расчёта в «прямой сумме»
+  const [clientPrice, setClientPrice] = useState(null) // сохранённая цена клиента (сом/кг) или null
+  const [saveClientPrice, setSaveClientPrice] = useState(false) // запомнить введённую цену за клиентом
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+
+  // Индивидуальная цена клиента по коду: ищем сохранённую цену и подставляем её
+  // в «Цена за кг» (можно переопределить). Так у клиента своя цена (250/220 вместо 270).
+  useEffect(() => {
+    const code = clientCode.trim()
+    if (!code) {
+      setClientPrice(null)
+      return
+    }
+    let active = true
+    const t = setTimeout(() => {
+      api
+        .get('/client-prices/', { params: { client_code: code } })
+        .then((res) => {
+          if (!active) return
+          const found = asList(res.data)[0] || null
+          setClientPrice(found)
+          // Автоподстановка только если пользователь ещё не вводил свою цену.
+          if (found && perKgInput === '') setPerKgInput(String(found.price_per_kg_som))
+        })
+        .catch(() => active && setClientPrice(null))
+    }, 350)
+    return () => {
+      active = false
+      clearTimeout(t)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientCode])
 
   // Ставки за 1 кг (цена и себестоимость) — для режима «прямая сумма»:
   // вес = сумма ÷ цена-за-кг, себестоимость = вес × себест-за-кг.
@@ -296,6 +356,15 @@ function SaleForm({ editing, accounts, onClose, onSaved }) {
       body.payment_date = null
       if (isEdit) await api.patch(`/sales/${editing.id}/`, body)
       else await api.post('/sales/', body)
+      // Запомнить индивидуальную цену за клиентом (upsert по коду на бэке).
+      if (saveClientPrice && Number(perKgInput) > 0 && clientCode.trim()) {
+        try {
+          await api.post('/client-prices/', {
+            client_code: clientCode.trim(),
+            price_per_kg_som: Number(perKgInput),
+          })
+        } catch { /* цена не критична для самой продажи — не валим сохранение */ }
+      }
       onSaved()
     } catch (err) {
       setError(errorMessage(err))
@@ -330,17 +399,28 @@ function SaleForm({ editing, accounts, onClose, onSaved }) {
         </Field>
 
         {mode === 'WEIGHT' ? (
+          <>
           <div className="row row-wrap">
             <Field label="Вес, кг" hint="Необязателен. Цена и себестоимость — от веса">
-              <input className="input" type="number" step="0.001" min="0" value={weight} onChange={(e) => setWeight(e.target.value)} placeholder="0.80" />
+              <input className="input" type="number" step="0.01" min="0" value={weight} onChange={(e) => setWeight(e.target.value)} placeholder="0.80" />
             </Field>
-            <Field label="Цена за кг, сом" hint={perKgRate ? `пусто = ${perKgRate} (из настроек)` : 'индивидуальная'}>
+            <Field
+              label="Цена за кг, сом"
+              hint={clientPrice ? `спец-цена клиента ${clientPrice.price_per_kg_som}` : perKgRate ? `пусто = ${perKgRate} (из настроек)` : 'индивидуальная'}
+            >
               <input className="input" type="number" step="0.01" min="0" value={perKgInput} onChange={(e) => setPerKgInput(e.target.value)} placeholder={perKgRate ? String(perKgRate) : 'из настроек'} />
             </Field>
             <Field label="Кол-во мест">
               <input className="input" type="number" min="1" value={places} onChange={(e) => setPlaces(e.target.value)} />
             </Field>
           </div>
+          {perKgInput !== '' && (
+            <label className="check-row">
+              <input type="checkbox" checked={saveClientPrice} onChange={(e) => setSaveClientPrice(e.target.checked)} />
+              <span>Запомнить эту цену за клиентом «{clientCode || '—'}» (подставится в его следующих продажах)</span>
+            </label>
+          )}
+          </>
         ) : (
           <div className="row row-wrap">
             <Field label="Сумма начисления, сом" hint="Вводится напрямую">
@@ -349,7 +429,7 @@ function SaleForm({ editing, accounts, onClose, onSaved }) {
             <Field label="Вес (расчётный), кг" hint="Из суммы — изменить нельзя">
               <input
                 className="input input-readonly"
-                value={directDerivedWeight > 0 ? directDerivedWeight.toFixed(3) : ''}
+                value={directDerivedWeight > 0 ? directDerivedWeight.toFixed(2) : ''}
                 placeholder="—"
                 readOnly
                 tabIndex={-1}

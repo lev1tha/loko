@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import {
   IconAccounts,
+  IconBook,
   IconBox,
   IconDashboard,
   IconExpense,
@@ -29,6 +30,7 @@ const GROUPS = [
     title: 'Loko Express',
     items: [
       { to: '/sales', label: 'Продажи', icon: IconSales },
+      { to: '/express/client-prices', label: 'Цены клиентов', icon: IconAccounts },
       { to: '/express/other-income', label: 'Прочий доход', icon: IconSales },
       { to: '/express/expenses', label: 'Расходы', icon: IconExpense },
       { to: '/express/transfers', label: 'Переводы и выплаты', icon: IconTransfer },
@@ -67,11 +69,20 @@ const ADMIN_GROUP = {
   ],
 }
 
+// Отдельная группа внизу — инструкция по системе (только для админа).
+const HELP_GROUP = {
+  title: 'Справка',
+  items: [
+    { to: '/guide', label: 'Инструкция', icon: IconBook },
+  ],
+}
+
 const TITLES = {
   '/': ['Сводка', 'Сводка по Loko (Express + Business)'],
   '/control': ['Сверка', 'Как складываются итоги — сверка с тетрадью'],
   '/journal': ['История операций', 'Все события (Express + Business) и как из них вышли цифры'],
   '/sales': ['Продажи', 'Loko Express · учёт карго и расчёт маржи'],
+  '/express/client-prices': ['Цены клиентов', 'Индивидуальная цена за кг по клиентам (исключения из цены по умолчанию)'],
   '/express/other-income': ['Прочий доход', 'Доходы не от карго — в выручку без себестоимости 55%'],
   '/express/expenses': ['Расходы · Loko Express', 'Типы расходов, изъятия и статьи — по Express'],
   '/express/transfers': ['Переводы и выплаты · Express', 'Переводы между счетами Express и вывод владельцем'],
@@ -90,6 +101,7 @@ const TITLES = {
   '/reports': ['Аналитика', 'ООПИУ и ОДДС за период'],
   '/settings': ['Настройки', 'Ценообразование, курсы и налог'],
   '/users': ['Пользователи', 'Управление доступом и ролями'],
+  '/guide': ['Инструкция', 'Как пользоваться системой — для администраторов'],
 }
 
 export default function Layout() {
@@ -100,7 +112,7 @@ export default function Layout() {
   const initials = (user?.username || '?').slice(0, 2).toUpperCase()
   const close = () => setOpen(false)
 
-  const groups = isAdmin ? [...GROUPS, ADMIN_GROUP] : GROUPS
+  const groups = isAdmin ? [...GROUPS, ADMIN_GROUP, HELP_GROUP] : GROUPS
 
   return (
     <div className="app-shell">

@@ -430,6 +430,20 @@ textarea.input { height: auto; padding: 10px 14px; resize: vertical; min-height:
 }
 /* Широкая модалка — для таблиц-расшифровок (детальный список операций). */
 .modal-wide { width: min(960px, 100%); }
+
+/* Сортируемые заголовки таблицы (клик по колонке). */
+.th-sort {
+  background: none; border: 0; padding: 0; margin: 0;
+  font: inherit; font-weight: 600; color: inherit; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.th-sort:hover { color: var(--ink); }
+.th-sort.active { color: var(--ink); }
+.th-arrow { font-size: 11px; color: var(--muted); min-width: 8px; }
+
+/* Строка с чекбоксом в форме. */
+.check-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--body); cursor: pointer; }
+.check-row input { width: 16px; height: 16px; flex-shrink: 0; }
 .modal-head {
   display: flex;
   align-items: center;

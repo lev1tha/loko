@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import api, { errorMessage } from '../api/client'
 import { useFetch, asList } from '../lib/hooks'
 import { today, som, kg, dateRu } from '../lib/format'
-import { Alert, Field, Segmented } from '../components/ui'
+import { Alert, Field, Modal, Segmented } from '../components/ui'
 import { LoadingTruck } from '../components/states'
 import { IconPlus } from '../components/icons'
 
@@ -30,6 +30,9 @@ export default function OperatorSale() {
   const [accountId, setAccountId] = useState('')
   const [quote, setQuote] = useState(null)
   const [rate, setRate] = useState(0) // стоимость 1 кг (сом) — для пересчёта суммы → вес
+  const [uniquePrice, setUniquePrice] = useState('') // активная уникальная цена за кг (сом)
+  const [uniqueDraft, setUniqueDraft] = useState('') // значение в модалке до «Применить»
+  const [showUnique, setShowUnique] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [saving, setSaving] = useState(false)
@@ -62,8 +65,10 @@ export default function OperatorSale() {
     }
     let active = true
     const t = setTimeout(() => {
+      // client_code — чтобы итог посчитался по спец-цене клиента (если задана).
+      // Саму цену сотрудник не видит, только «Общую стоимость».
       api
-        .post('/sales/quote/', { weight_kg: totalWeight })
+        .post('/sales/quote/', { weight_kg: totalWeight, client_code: clientCode.trim() })
         .then((res) => active && setQuote(res.data))
         .catch(() => active && setQuote(null))
     }, 250)
@@ -71,13 +76,20 @@ export default function OperatorSale() {
       active = false
       clearTimeout(t)
     }
-  }, [totalWeight, mode])
+  }, [totalWeight, mode, clientCode])
 
   const directNum = parseFloat(directAmount) || 0
-  // Расчётный вес для «прямой суммы» — только показ, не редактируется.
-  const derivedWeight = rate > 0 && directNum > 0 ? Number((directNum / rate).toFixed(3)) : 0
-  // Общая стоимость: по весу — из расчёта, иначе — введённая сумма.
-  const total = mode === 'WEIGHT' ? Number(quote?.price_som || 0) : directNum
+  // Расчётный вес для «прямой суммы» — только показ, не редактируется (2 знака).
+  const derivedWeight = rate > 0 && directNum > 0 ? Number((directNum / rate).toFixed(2)) : 0
+  // Уникальная цена за кг: вес НЕ меняется, меняется цена за вес → пересчёт стоимости.
+  const uniqueNum = parseFloat(uniquePrice) || 0
+  const hasUnique = uniqueNum > 0
+  // Вес-основа: «по весу» — итоговый вес; «прямая сумма» — расчётный вес из суммы.
+  const baseWeight = mode === 'WEIGHT' ? totalWeight : derivedWeight
+  // Общая стоимость: с уникальной ценой = вес × цена; иначе по весу из расчёта / введённая сумма.
+  const total = hasUnique && baseWeight > 0
+    ? Number((baseWeight * uniqueNum).toFixed(2))
+    : mode === 'WEIGHT' ? Number(quote?.price_som || 0) : directNum
 
   async function submit(e) {
     e.preventDefault()
@@ -115,7 +127,12 @@ export default function OperatorSale() {
         paid_som: null,
         payment_date: null,
       }
-      if (mode === 'WEIGHT') {
+      if (hasUnique && baseWeight > 0) {
+        // Уникальная цена: вес сохраняем как есть, стоимость = вес × цена за кг.
+        body.amount_mode = 'DIRECT'
+        body.price_som = (baseWeight * uniqueNum).toFixed(2)
+        body.weight_kg = baseWeight
+      } else if (mode === 'WEIGHT') {
         // Итоговый вес груза (вес места × мест).
         body.weight_kg = totalWeight > 0 ? totalWeight : null
       } else {
@@ -132,6 +149,7 @@ export default function OperatorSale() {
       setWeight('')
       setDirectAmount('')
       setPlaces('1')
+      setUniquePrice('')
       setQuote(null)
       codeRef.current?.focus()
     } catch (err) {
@@ -194,7 +212,7 @@ export default function OperatorSale() {
                 <input
                   className="input"
                   type="number"
-                  step="0.001"
+                  step="0.01"
                   min="0"
                   value={weight}
                   onChange={(e) => setWeight(e.target.value)}
@@ -235,7 +253,7 @@ export default function OperatorSale() {
             <Field label="Вес (расчётный), кг" hint="Считается из суммы — изменить нельзя">
               <input
                 className="input input-readonly"
-                value={derivedWeight > 0 ? derivedWeight.toFixed(3) : ''}
+                value={derivedWeight > 0 ? derivedWeight.toFixed(2) : ''}
                 placeholder="—"
                 readOnly
                 tabIndex={-1}
@@ -243,6 +261,21 @@ export default function OperatorSale() {
             </Field>
           </div>
         )}
+
+        <div className="field">
+          <button
+            type="button"
+            className={`btn btn-block ${hasUnique ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => { setUniqueDraft(uniquePrice); setShowUnique(true) }}
+          >
+            {hasUnique ? `Уникальная цена: ${uniqueNum} сом/кг` : 'Уникальная цена'}
+          </button>
+          {hasUnique && baseWeight > 0 && (
+            <span className="field-hint">
+              Вес {kg(baseWeight)} не меняется · цена {uniqueNum} сом/кг → {som(total)}
+            </span>
+          )}
+        </div>
 
         <Field label="Счёт зачисления (нал/безнал)">
           <select
@@ -268,6 +301,53 @@ export default function OperatorSale() {
           <IconPlus size={18} /> {saving ? 'Добавление…' : 'Добавить продажу'}
         </button>
       </form>
+
+      {showUnique && (
+        <Modal
+          title="Уникальная цена за кг"
+          onClose={() => setShowUnique(false)}
+          footer={
+            <>
+              {hasUnique && (
+                <button className="btn btn-secondary" onClick={() => { setUniquePrice(''); setShowUnique(false) }}>
+                  Сбросить
+                </button>
+              )}
+              <button className="btn btn-secondary" onClick={() => setShowUnique(false)}>Отмена</button>
+              <button className="btn btn-primary" onClick={() => { setUniquePrice(uniqueDraft); setShowUnique(false) }}>
+                Применить
+              </button>
+            </>
+          }
+        >
+          <p className="caption" style={{ margin: 0, lineHeight: 1.5 }}>
+            Задайте цену за 1 кг для этого клиента. Вес не изменится — пересчитается общая стоимость.
+          </p>
+          <Field label="Цена за 1 кг, сом">
+            <input
+              className="input"
+              type="number"
+              step="0.01"
+              min="0"
+              value={uniqueDraft}
+              onChange={(e) => setUniqueDraft(e.target.value)}
+              placeholder="250"
+              autoFocus
+            />
+          </Field>
+          {baseWeight > 0 ? (
+            Number(uniqueDraft) > 0 && (
+              <div className="caption">
+                Итог: {kg(baseWeight)} × {Number(uniqueDraft)} сом = <strong>{som(baseWeight * Number(uniqueDraft))}</strong>
+              </div>
+            )
+          ) : (
+            <Alert kind="error">
+              Сначала укажите {mode === 'WEIGHT' ? 'вес' : 'сумму'} — от него считается стоимость.
+            </Alert>
+          )}
+        </Modal>
+      )}
     </div>
   )
 }
