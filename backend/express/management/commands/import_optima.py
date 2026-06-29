@@ -183,9 +183,11 @@ class Command(BaseCommand):
         )
 
     def _exp(self, acc, amount, d, label):
+        # Банковские оттоки = карго-себестоимость (касса/ОДДС). В ОПиУ себестоимость
+        # считается как % от выручки (документ-спецификация), а не из этих строк.
         amount = amount.quantize(TWO, rounding=ROUND_HALF_UP)
         return Expense(
-            account=acc, category=ExpenseCategory.OPEX, opex_article=OpexArticle.OTHER,
+            account=acc, category=ExpenseCategory.COGS, opex_article=None,
             amount=amount, paid_amount=amount, description=(label or "Расход")[:500],
             date=d, payment_date=d,
         )

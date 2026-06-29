@@ -3,7 +3,10 @@ from decimal import Decimal
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
-from .models import Account, AppSettings, Currency, Expense, ExpenseCategory, OpexArticle, Transfer
+from .models import (
+    Account, AppSettings, Currency, Expense, ExpenseArticle, ExpenseCategory,
+    FINANCING_ARTICLES, INVESTING_ARTICLES, OPERATING_ARTICLES, OtherIncome, Transfer,
+)
 
 _KGS_FIELD = serializers.DecimalField(max_digits=16, decimal_places=2)
 
@@ -129,18 +132,27 @@ class ExpenseSerializer(serializers.ModelSerializer):
                     {"paid_amount": "Оплата не может превышать сумму начисления."}
                 )
 
-        if category == ExpenseCategory.OPEX:
+        valid_by_cat = {
+            ExpenseCategory.OPEX: OPERATING_ARTICLES,
+            ExpenseCategory.INVEST: INVESTING_ARTICLES,
+            ExpenseCategory.FINANCING: FINANCING_ARTICLES,
+        }
+        if category in valid_by_cat:
             if not article:
                 raise serializers.ValidationError(
-                    {"opex_article": "Для операционного расхода выберите статью."}
+                    {"opex_article": "Выберите статью расхода."}
+                )
+            if article not in valid_by_cat[category]:
+                raise serializers.ValidationError(
+                    {"opex_article": "Статья не соответствует выбранной категории."}
                 )
             # «Прочие расходы» → комментарий строго обязателен.
-            if article == OpexArticle.OTHER and not (description or "").strip():
+            if article == ExpenseArticle.OTHER and not (description or "").strip():
                 raise serializers.ValidationError(
                     {"description": "Для «Прочих расходов» комментарий обязателен."}
                 )
         else:
-            # Article only applies to OpEx.
+            # Категории без детализации (Себест./Поставщик/Изъятие/Другое).
             attrs["opex_article"] = None
         return attrs
 
@@ -222,3 +234,26 @@ class TransferSerializer(serializers.ModelSerializer):
         if attrs.get("to_amount") is not None and attrs["to_amount"] <= 0:
             raise serializers.ValidationError({"to_amount": "Сумма зачисления должна быть больше нуля."})
         return attrs
+
+
+class OtherIncomeSerializer(serializers.ModelSerializer):
+    account_name = serializers.CharField(source="account.name", read_only=True)
+    account_currency = serializers.CharField(source="account.currency", read_only=True)
+    amount_kgs = serializers.SerializerMethodField()
+
+    @extend_schema_field(_KGS_FIELD)
+    def get_amount_kgs(self, obj):
+        return obj.kgs_amount
+
+    class Meta:
+        model = OtherIncome
+        fields = (
+            "id", "account", "account_name", "account_currency",
+            "amount", "amount_kgs", "description", "date", "created_at",
+        )
+        read_only_fields = ("created_at",)
+
+    def validate_amount(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("Сумма должна быть больше нуля.")
+        return value

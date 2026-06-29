@@ -84,6 +84,15 @@ class AppSettings(models.Model):
         max_digits=5, decimal_places=2, default=Decimal("4"),
         verbose_name="Налог — безналичные (%)",
     )
+    # ОПиУ Express по документу-спецификации (редактируемые).
+    express_cogs_pct = models.DecimalField(
+        max_digits=5, decimal_places=2, default=Decimal("55"),
+        verbose_name="Себестоимость Express (% от выручки)",
+    )
+    single_tax_pct = models.DecimalField(
+        max_digits=5, decimal_places=2, default=Decimal("4"),
+        verbose_name="Единый налог Express (% от выручки)",
+    )
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -204,12 +213,20 @@ class Account(models.Model):
         agg = self.outgoing_transfers.aggregate(s=Sum("amount"))["s"]
         return agg or Decimal("0")
 
+    def other_income_total(self) -> Decimal:
+        # Прочий доход (не от продаж/депозитов), физически полученный на счёт.
+        if not hasattr(self, "other_incomes"):
+            return Decimal("0")
+        agg = self.other_incomes.aggregate(s=Sum("amount"))["s"]
+        return agg or Decimal("0")
+
     @property
     def current_balance(self) -> Decimal:
-        """Начальный + Доходы + Депозиты − Расходы +/− Перемещения (в валюте счёта)."""
+        """Начальный + Доходы + Прочий доход + Депозиты − Расходы +/− Перемещения."""
         return (
             self.initial_balance
             + self.income_total()
+            + self.other_income_total()
             + self.deposit_total()
             - self.expense_total()
             + self.transfers_in_total()
@@ -228,6 +245,8 @@ class Account(models.Model):
         total = self.initial_balance * (self.initial_kgs_rate or ONE)
         # Продажи (Express) всегда в сомах — но на CNY-счёте их обычно нет.
         total += self.income_total()
+        for oi in self.other_incomes.all():
+            total += oi.kgs_amount
         for d in self.deposits.all():
             total += d.kgs_value
         for e in self.expenses.all():
@@ -239,14 +258,48 @@ class Account(models.Model):
         return total
 
 
-class OpexArticle(models.TextChoices):
-    """Operating-expense articles (sub-categories of OpEx)."""
+class ExpenseArticle(models.TextChoices):
+    """Статья расхода — детализация внутри категории (раздела ОДДС).
 
+    Сгруппированы по виду деятельности (как в документе-спецификации):
+      * Операционные — аренда, ФОТ, подоходный, соц.фонд, прочие;
+      * Инвестиционные — мебель/оборудование, ремонт, строительство склада;
+      * Финансовые — займы (получение/тело/проценты), вклад собственника.
+    «Изъятие собственника» — это отдельная категория OWNER, статья не нужна.
+    """
+
+    # Операционные
     RENT = "RENT", "Аренда"
     PAYROLL = "PAYROLL", "ФОТ (Фонд оплаты труда)"
     INCOME_TAX = "INCOME_TAX", "Подоходный налог"
     SOCIAL_FUND = "SOCIAL_FUND", "Соц.фонд"
     OTHER = "OTHER", "Прочие расходы"
+    # Инвестиционные
+    EQUIPMENT = "EQUIPMENT", "Мебель / оборудование"
+    REPAIR = "REPAIR", "Ремонт помещения"
+    WAREHOUSE = "WAREHOUSE", "Строительство склада"
+    # Финансовые
+    LOAN_RECEIVED = "LOAN_RECEIVED", "Получение займа"
+    OWNER_CONTRIB = "OWNER_CONTRIB", "Вклад собственника"
+    LOAN_PRINCIPAL = "LOAN_PRINCIPAL", "Выплата займа (тело)"
+    LOAN_INTEREST = "LOAN_INTEREST", "Выплата займа (проценты)"
+
+
+# Обратная совместимость (старое имя enum).
+OpexArticle = ExpenseArticle
+
+# Какие статьи относятся к какому разделу — для отчётов и валидации.
+OPERATING_ARTICLES = frozenset({
+    ExpenseArticle.RENT, ExpenseArticle.PAYROLL, ExpenseArticle.INCOME_TAX,
+    ExpenseArticle.SOCIAL_FUND, ExpenseArticle.OTHER,
+})
+INVESTING_ARTICLES = frozenset({
+    ExpenseArticle.EQUIPMENT, ExpenseArticle.REPAIR, ExpenseArticle.WAREHOUSE,
+})
+FINANCING_ARTICLES = frozenset({
+    ExpenseArticle.LOAN_RECEIVED, ExpenseArticle.OWNER_CONTRIB,
+    ExpenseArticle.LOAN_PRINCIPAL, ExpenseArticle.LOAN_INTEREST,
+})
 
 
 class ExpenseCategory(models.TextChoices):
@@ -282,11 +335,11 @@ class Expense(models.Model):
         verbose_name="Категория",
     )
     opex_article = models.CharField(
-        max_length=12,
-        choices=OpexArticle.choices,
+        max_length=14,
+        choices=ExpenseArticle.choices,
         blank=True,
         null=True,
-        verbose_name="Статья OpEx",
+        verbose_name="Статья расхода",
     )
     amount = models.DecimalField(
         max_digits=14, decimal_places=2, verbose_name="Сумма начисления"
@@ -438,3 +491,48 @@ class Transfer(models.Model):
 
     def __str__(self) -> str:
         return f"{self.from_account} → {self.to_account}: {self.amount}"
+
+
+class OtherIncome(models.Model):
+    """Прочий доход — не от карго-продаж и не депозит (напр. возмещение, услуги).
+
+    Входит в ВЫРУЧКУ ОПиУ и приток ОДДС, но БЕЗ расчётной себестоимости 55%
+    (у прочего дохода нет карго-затрат). Физически увеличивает остаток счёта.
+    """
+
+    account = models.ForeignKey(
+        Account, on_delete=models.PROTECT, related_name="other_incomes",
+        verbose_name="Счёт зачисления",
+    )
+    amount = models.DecimalField(max_digits=14, decimal_places=2, verbose_name="Сумма")
+    kgs_rate = models.DecimalField(
+        max_digits=10, decimal_places=4, null=True, blank=True, verbose_name="Курс юаня (снапшот)"
+    )
+    description = models.CharField(max_length=500, blank=True, verbose_name="Источник / комментарий")
+    date = models.DateField(verbose_name="Дата")
+    created_by = models.ForeignKey(
+        dj_settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="other_incomes",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Прочий доход"
+        verbose_name_plural = "Прочие доходы"
+        ordering = ("-date", "-id")
+
+    @property
+    def kgs_amount(self) -> Decimal:
+        return kgs_of(self.amount, self.account.currency, self.kgs_rate)
+
+    def save(self, *args, **kwargs):
+        # Снапшот курса юаня для CNY-счёта (как у расходов/депозитов).
+        if self.account_id and self.account.currency == Currency.CNY:
+            if self.kgs_rate is None:
+                self.kgs_rate = live_cny_rate()
+        else:
+            self.kgs_rate = None
+        super().save(*args, **kwargs)
+
+    def __str__(self) -> str:
+        return f"Прочий доход {self.amount} — {self.description[:30]}"

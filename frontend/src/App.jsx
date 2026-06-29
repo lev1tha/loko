@@ -9,6 +9,7 @@ import NotFound from './pages/NotFound'
 import Dashboard from './pages/Dashboard'
 import Control from './pages/Control'
 import Sales from './pages/Sales'
+import OtherIncome from './pages/OtherIncome'
 import OperatorSale from './pages/OperatorSale'
 import Expenses from './pages/Expenses'
 import Accounts from './pages/Accounts'
@@ -74,6 +75,7 @@ function AppRoutes() {
 
         {/* Loko Express */}
         <Route path="sales" element={<Sales />} />
+        <Route path="express/other-income" element={<OtherIncome />} />
         <Route path="express/accounts" element={<Accounts module="EXPRESS" />} />
 
         {/* Loko Business */}

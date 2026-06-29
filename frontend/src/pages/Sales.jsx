@@ -214,7 +214,8 @@ function SaleForm({ editing, accounts, onClose, onSaved }) {
   const [accountId, setAccountId] = useState(editing?.account || accounts[0]?.id || '')
   const [date, setDate] = useState(editing?.date || today())
   const [quote, setQuote] = useState(null)
-  const [perKgRate, setPerKgRate] = useState(0) // цена 1 кг (сом) — для пересчёта суммы → вес
+  const [perKgRate, setPerKgRate] = useState(0) // цена 1 кг (сом) из настроек — для пересчёта суммы → вес
+  const [perKgInput, setPerKgInput] = useState('') // индивидуальная цена за кг (сом); пусто = из настроек
   const [costPerKg, setCostPerKg] = useState(0) // себестоимость 1 кг (сом) — для расчёта в «прямой сумме»
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
@@ -252,7 +253,12 @@ function SaleForm({ editing, accounts, onClose, onSaved }) {
     }
   }, [weight, mode])
 
-  const accrual = mode === 'WEIGHT' ? Number(quote?.price_som || 0) : Number(directAmount || 0)
+  // Индивидуальная цена за кг (сом): пусто = из настроек (perKgRate).
+  const effPerKg = perKgInput !== '' ? Number(perKgInput) : perKgRate
+  const accrual =
+    mode === 'WEIGHT'
+      ? (perKgInput !== '' ? (Number(weight) || 0) * effPerKg : Number(quote?.price_som || 0))
+      : Number(directAmount || 0)
   // «Прямая сумма»: расчётный вес (только показ, не редактируется) = сумма ÷ ставка за кг.
   const directDerivedWeight =
     perKgRate > 0 && Number(directAmount) > 0 ? Number(directAmount) / perKgRate : 0
@@ -275,8 +281,16 @@ function SaleForm({ editing, accounts, onClose, onSaved }) {
         date,
         cost_is_manual: false, // себестоимость всегда автоматическая (ставка из Настроек)
       }
-      if (mode === 'WEIGHT') body.weight_kg = weight || null
-      else body.price_som = directAmount
+      if (mode === 'WEIGHT') {
+        if (perKgInput !== '' && Number(weight) > 0) {
+          // Индивидуальная цена за кг → шлём прямую сумму = вес × цена (вес сохраняем).
+          body.amount_mode = 'DIRECT'
+          body.price_som = ((Number(weight) || 0) * Number(perKgInput)).toFixed(2)
+          body.weight_kg = weight
+        } else {
+          body.weight_kg = weight || null
+        }
+      } else body.price_som = directAmount
       // Express: оплата всегда полная в день операции (начислено = оплачено).
       body.paid_som = null
       body.payment_date = null
@@ -319,6 +333,9 @@ function SaleForm({ editing, accounts, onClose, onSaved }) {
           <div className="row row-wrap">
             <Field label="Вес, кг" hint="Необязателен. Цена и себестоимость — от веса">
               <input className="input" type="number" step="0.001" min="0" value={weight} onChange={(e) => setWeight(e.target.value)} placeholder="0.80" />
+            </Field>
+            <Field label="Цена за кг, сом" hint={perKgRate ? `пусто = ${perKgRate} (из настроек)` : 'индивидуальная'}>
+              <input className="input" type="number" step="0.01" min="0" value={perKgInput} onChange={(e) => setPerKgInput(e.target.value)} placeholder={perKgRate ? String(perKgRate) : 'из настроек'} />
             </Field>
             <Field label="Кол-во мест">
               <input className="input" type="number" min="1" value={places} onChange={(e) => setPlaces(e.target.value)} />

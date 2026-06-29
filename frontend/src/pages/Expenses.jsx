@@ -22,13 +22,28 @@ export const EXPENSE_CATEGORIES = [
   { value: 'FINANCING', label: 'Финансовая (кредиты/проценты)' },
 ]
 
-export const OPEX_ARTICLES = [
-  { value: 'RENT', label: 'Аренда' },
-  { value: 'PAYROLL', label: 'ФОТ (Фонд оплаты труда)' },
-  { value: 'INCOME_TAX', label: 'Подоходный налог' },
-  { value: 'SOCIAL_FUND', label: 'Соц.фонд' },
-  { value: 'OTHER', label: 'Прочие расходы' },
-]
+// Статьи расхода по категориям (раздел ОДДС → детализация).
+export const ARTICLES_BY_CAT = {
+  OPEX: [
+    { value: 'RENT', label: 'Аренда' },
+    { value: 'PAYROLL', label: 'ФОТ (Фонд оплаты труда)' },
+    { value: 'INCOME_TAX', label: 'Подоходный налог' },
+    { value: 'SOCIAL_FUND', label: 'Соц.фонд' },
+    { value: 'OTHER', label: 'Прочие расходы' },
+  ],
+  INVEST: [
+    { value: 'EQUIPMENT', label: 'Мебель / оборудование' },
+    { value: 'REPAIR', label: 'Ремонт помещения' },
+    { value: 'WAREHOUSE', label: 'Строительство склада' },
+  ],
+  FINANCING: [
+    { value: 'LOAN_RECEIVED', label: 'Получение займа' },
+    { value: 'OWNER_CONTRIB', label: 'Вклад собственника' },
+    { value: 'LOAN_PRINCIPAL', label: 'Выплата займа (тело)' },
+    { value: 'LOAN_INTEREST', label: 'Выплата займа (проценты)' },
+  ],
+}
+export const OPEX_ARTICLES = ARTICLES_BY_CAT.OPEX
 
 const CAT_HINT = {
   OPEX: 'Влияет на ООПИУ и ОДДС',
@@ -128,7 +143,7 @@ export default function Expenses() {
                 <tr>
                   <th>Дата</th>
                   <th>Категория</th>
-                  <th>Статья (OpEx)</th>
+                  <th>Статья</th>
                   <th>Счёт списания</th>
                   <th className="num">Начислено</th>
                   <th className="num">Оплачено</th>
@@ -202,9 +217,15 @@ function ExpenseForm({ editing, accounts, onClose, onSaved }) {
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
-  const isOpex = category === 'OPEX'
-  const commentRequired = isOpex && article === 'OTHER'
+  const articles = ARTICLES_BY_CAT[category] || null
+  const commentRequired = category === 'OPEX' && article === 'OTHER'
   const acc = accounts.find((a) => String(a.id) === String(accountId))
+
+  function changeCategory(newCat) {
+    setCategory(newCat)
+    const list = ARTICLES_BY_CAT[newCat]
+    setArticle(list ? list[0].value : '')
+  }
 
   async function submit(e) {
     e.preventDefault()
@@ -217,7 +238,7 @@ function ExpenseForm({ editing, accounts, onClose, onSaved }) {
     try {
       const body = {
         category,
-        opex_article: isOpex ? article : null,
+        opex_article: articles ? article : null,
         account: accountId,
         amount,
         paid_amount: paid !== '' ? paid : amount,
@@ -251,17 +272,17 @@ function ExpenseForm({ editing, accounts, onClose, onSaved }) {
       <form onSubmit={submit} className="col">
         {error && <Alert kind="error">{error}</Alert>}
         <Field label="Категория расхода" hint={CAT_HINT[category]}>
-          <select className="select" value={category} onChange={(e) => setCategory(e.target.value)}>
+          <select className="select" value={category} onChange={(e) => changeCategory(e.target.value)}>
             {EXPENSE_CATEGORIES.map((c) => (
               <option key={c.value} value={c.value}>{c.label}</option>
             ))}
           </select>
         </Field>
 
-        {isOpex && (
-          <Field label="Статья операционного расхода">
+        {articles && (
+          <Field label="Статья расхода">
             <select className="select" value={article} onChange={(e) => setArticle(e.target.value)}>
-              {OPEX_ARTICLES.map((a) => (
+              {articles.map((a) => (
                 <option key={a.value} value={a.value}>{a.label}</option>
               ))}
             </select>

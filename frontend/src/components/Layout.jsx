@@ -29,6 +29,7 @@ const GROUPS = [
     title: 'Loko Express',
     items: [
       { to: '/sales', label: 'Продажи', icon: IconSales },
+      { to: '/express/other-income', label: 'Прочий доход', icon: IconSales },
       { to: '/express/accounts', label: 'Счета Express', icon: IconAccounts },
     ],
   },
@@ -65,6 +66,7 @@ const TITLES = {
   '/control': ['Контроль / сверка', 'Как складываются итоги — сверка с тетрадью'],
   '/journal': ['Журнал операций', 'Все события (Express + Business) и как из них вышли цифры'],
   '/sales': ['Продажи', 'Loko Express · учёт карго и расчёт маржи'],
+  '/express/other-income': ['Прочий доход', 'Доходы не от карго — в выручку без себестоимости 55%'],
   '/express/accounts': ['Счета Express', 'Остатки касс и банков (сом)'],
   '/business/accounts': ['Счета Business', 'Мультивалютные счета · сом / юань'],
   '/business/orders': ['Заказы Business', 'Маржа по клиентам: выручка − закуп'],

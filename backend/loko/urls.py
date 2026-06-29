@@ -15,6 +15,7 @@ from finance.views import (
     AccountViewSet,
     AppSettingsView,
     ExpenseViewSet,
+    OtherIncomeViewSet,
     TransferViewSet,
     balances,
     breakdown_report,
@@ -22,6 +23,7 @@ from finance.views import (
     cashflow_report,
     debts_report,
     journal_report,
+    monthly_report,
     pnl_report,
 )
 
@@ -29,6 +31,7 @@ router = DefaultRouter()
 router.register("users", UserViewSet, basename="user")
 router.register("accounts", AccountViewSet, basename="account")
 router.register("expenses", ExpenseViewSet, basename="expense")
+router.register("other-income", OtherIncomeViewSet, basename="other-income")
 router.register("transfers", TransferViewSet, basename="transfer")
 router.register("sales", SaleViewSet, basename="sale")
 router.register("deposits", DepositViewSet, basename="deposit")
@@ -42,6 +45,7 @@ api_urlpatterns = [
     path("settings/", AppSettingsView.as_view(), name="settings"),
     path("reports/pnl/", pnl_report, name="pnl"),
     path("reports/cashflow/", cashflow_report, name="cashflow"),
+    path("reports/monthly/", monthly_report, name="monthly"),
     path("reports/balances/", balances, name="balances"),
     path("reports/debts/", debts_report, name="debts"),
     path("reports/business-orders/", business_orders_report, name="business_orders"),

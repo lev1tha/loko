@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useFetch } from '../lib/hooks'
 import { firstOfMonth, today, money, num, dateRu, signClass } from '../lib/format'
-import { Field, Modal, Segmented, Spinner, Stat } from '../components/ui'
+import { EmptyState, Field, Modal, Segmented, Spinner, Stat } from '../components/ui'
 
 const PAYMENTS = [
   { value: 'all', label: 'Все' },
@@ -17,6 +17,24 @@ const MODULES = [
   { value: 'EXPRESS', label: 'Express' },
   { value: 'BUSINESS', label: 'Business' },
 ]
+const VIEWS = [
+  { value: 'period', label: 'За период' },
+  { value: 'monthly', label: 'Помесячно' },
+]
+const MONTHS_RU = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек']
+const fmtMonth = (m) => { const [y, mo] = String(m).split('-'); return `${MONTHS_RU[Number(mo) - 1] || mo} ${y}` }
+const MONTHLY_ROWS = {
+  pnl: [
+    ['revenue', 'Выручка'], ['cogs', 'Себестоимость', true], ['gross_profit', 'Валовая прибыль'],
+    ['operating_expenses', 'Операционные расходы', true], ['pre_tax_profit', 'Прибыль до налога'],
+    ['tax', 'Единый налог', true], ['net_profit', 'Чистая прибыль'],
+  ],
+  cashflow: [
+    ['operating_inflow', 'Операционный приток'], ['net_operating', 'Чистый операционный'],
+    ['net_investing', 'Инвестиционная'], ['net_financing', 'Финансовая'],
+    ['net_cash_flow', 'Чистое изменение'], ['closing_balance', 'Остаток на конец'],
+  ],
+}
 
 export default function Reports() {
   const [from, setFrom] = useState(firstOfMonth())
@@ -25,12 +43,15 @@ export default function Reports() {
   const [report, setReport] = useState('pnl')
   const [module, setModule] = useState('all')
   const [taxRate, setTaxRate] = useState('')
+  const [opening, setOpening] = useState('')
+  const [view, setView] = useState('period') // 'period' | 'monthly'
   const [drill, setDrill] = useState(null) // { line, label, basis }
 
   const moduleParam = module !== 'all' ? { module } : {}
   const pnlParams = { from, to, payment, ...moduleParam, ...(taxRate !== '' ? { tax_rate: taxRate } : {}) }
   const pnl = useFetch('/reports/pnl/', pnlParams)
-  const cash = useFetch('/reports/cashflow/', { from, to, payment, ...moduleParam })
+  const cash = useFetch('/reports/cashflow/', { from, to, payment, ...moduleParam, ...(opening !== '' ? { opening } : {}) })
+  const monthly = useFetch('/reports/monthly/', { from, to, report, ...moduleParam })
 
   const openDrill = (basis) => (line, label) => setDrill({ line, label, basis })
 
@@ -58,9 +79,19 @@ export default function Reports() {
                 onChange={(e) => setTaxRate(e.target.value)} placeholder="из настроек" />
             </Field>
           )}
+          {report === 'cashflow' && (
+            <Field label="Остаток на начало" hint="Пусто = авто из истории">
+              <input className="input" type="number" step="0.01" value={opening}
+                onChange={(e) => setOpening(e.target.value)} placeholder="авто" />
+            </Field>
+          )}
           <div className="field">
             <span className="field-label">Отчёт</span>
             <Segmented value={report} onChange={setReport} options={REPORTS} />
+          </div>
+          <div className="field">
+            <span className="field-label">Вид</span>
+            <Segmented value={view} onChange={setView} options={VIEWS} />
           </div>
         </div>
         <p className="caption" style={{ margin: '12px 0 0' }}>
@@ -69,7 +100,9 @@ export default function Reports() {
         </p>
       </div>
 
-      {report === 'pnl' ? (
+      {view === 'monthly' ? (
+        monthly.loading ? <Spinner /> : <MonthlyTable data={monthly.data} report={report} />
+      ) : report === 'pnl' ? (
         pnl.loading ? <Spinner /> : <Pnl data={pnl.data} onDrill={openDrill('accrual')} />
       ) : cash.loading ? (
         <Spinner />
@@ -164,6 +197,11 @@ function Pnl({ data, onDrill }) {
   const arts = d.opex_articles || {}
   const ops = d.operations || {}
   const order = ['RENT', 'PAYROLL', 'INCOME_TAX', 'SOCIAL_FUND', 'OTHER']
+  // Налог: Express — единый % от выручки; Business — по каналам на прибыль.
+  const taxParts = []
+  if (Number(d.express_tax)) taxParts.push(`Express: единый ${Number(d.single_tax_pct || 0)}% от выручки`)
+  if (Number(d.business_tax)) taxParts.push(`Business: нал ${Number(d.cash_tax_rate || 0)}%/безнал ${Number(d.noncash_tax_rate || 0)}%`)
+  const taxSub = taxParts.join(' · ') || `эфф. ${Number(d.tax_rate || 0)}%`
   return (
     <>
     <div className="grid" style={{ marginBottom: 'var(--s-lg)' }}>
@@ -184,6 +222,7 @@ function Pnl({ data, onDrill }) {
             <Line label="Выручка" value={d.revenue} strong level lineKey="revenue" onDrill={onDrill} />
             <Line label="Продажи Loko Express" value={d.express_revenue} sign="plus" indent lineKey="express_revenue" onDrill={onDrill} />
             <Line label="Депозиты, признанные как выручка" value={d.deposit_revenue} sign="plus" indent lineKey="deposit_revenue" onDrill={onDrill} />
+            {Number(d.other_income) !== 0 && <Line label="Прочий доход" value={d.other_income} sign="plus" indent />}
             <Line label="Себестоимость" value={d.cogs} sign="minus" indent lineKey="cogs" onDrill={onDrill} />
             <Line label="Валовая прибыль" value={d.gross_profit} strong level />
             <Line label="Валовая маржа, %" value={null} sub={`${Number(d.gross_margin_pct || 0)} %`} indent />
@@ -192,11 +231,10 @@ function Pnl({ data, onDrill }) {
               <Line key={k} label={arts[k].label} sub={arts[k].count ? `${arts[k].count} опер.` : null} value={arts[k].amount} sign="minus" indent lineKey={`opex_${k}`} onDrill={onDrill} />
             ))}
             <Line label="Операционная прибыль" value={d.operating_profit} strong level />
-            <Line label="Прочие доходы" value={d.other_income} sign="plus" indent />
             <Line label="Прочие расходы" value={d.other_expenses} sign="minus" indent lineKey="other" onDrill={onDrill} />
             <Line label="Финансовые расходы" value={d.financial_expenses} sign="minus" indent />
             <Line label="Прибыль до налогообложения" value={d.pre_tax_profit} strong level />
-            <Line label="Налоги (нал/безнал)" sub={`нал ${Number(d.cash_tax_rate || 0)}% · безнал ${Number(d.noncash_tax_rate || 0)}% → эфф. ${Number(d.tax_rate || 0)}%`} value={d.tax} sign="minus" indent />
+            <Line label="Налог" sub={taxSub} value={d.tax} sign="minus" indent />
             <Line label="Чистая прибыль" value={d.net_profit} strong level />
             <Line label="Чистая рентабельность, %" value={null} sub={`${Number(d.net_margin_pct || 0)} %`} indent />
           </tbody>
@@ -231,10 +269,11 @@ function CashFlow({ data, onDrill }) {
       <div className="table-wrap">
         <table className="table" style={{ minWidth: 0 }}>
           <tbody>
-            <Line label="Остаток денег на начало" value={d.opening_balance} strong level />
+            <Line label="Остаток денег на начало" value={d.opening_balance} strong level sub={d.opening_manual ? 'введён вручную' : undefined} />
             <Line label="Операционный приток" value={d.operating_inflow} sign="plus" lineKey="inflow" onDrill={onDrill} />
             <Line label="Продажи Loko Express (оплата)" value={d.express_inflow} sign="plus" indent lineKey="express_revenue" onDrill={onDrill} />
             <Line label="Принятые депозиты (Business)" value={d.deposits_inflow} sign="plus" indent lineKey="deposit_revenue" onDrill={onDrill} />
+            {Number(d.other_income_inflow) !== 0 && <Line label="Прочий доход" value={d.other_income_inflow} sign="plus" indent />}
             <Line label="Операционный отток" value={d.operating_outflow} sign="minus" />
             <Line label="OpEx" value={d.opex} sign="minus" indent lineKey="opex" onDrill={onDrill} />
             <Line label="Закуп товара (себест.)" value={d.cogs_paid} sign="minus" indent lineKey="cogs" onDrill={onDrill} />
@@ -242,10 +281,22 @@ function CashFlow({ data, onDrill }) {
             <Line label="Прочее (неоперац.)" value={d.other_outflow} sign="minus" indent lineKey="other" onDrill={onDrill} />
             <Line label="Чистый операционный ДДС" value={d.net_operating} strong level />
             <Line label="Инвестиционная деятельность" value={d.net_investing} strong level />
-            <Line label="Покупка оборудования/активов" value={d.investing_outflow} sign="minus" indent lineKey="invest" onDrill={onDrill} />
+            {Object.keys(d.investing_articles || {}).length ? (
+              Object.entries(d.investing_articles).map(([k, a]) => (
+                <Line key={k} label={a.label} sub={a.count ? `${a.count} опер.` : null} value={a.amount} sign="minus" indent />
+              ))
+            ) : (
+              <Line label="Приобретение основных средств" value={d.investing_outflow} sign="minus" indent lineKey="invest" onDrill={onDrill} />
+            )}
             <Line label="Финансовая деятельность" value={d.net_financing} strong level />
             <Line label="Изъятие собственника" value={d.owner_withdrawals} sign="minus" indent lineKey="owner" onDrill={onDrill} />
-            <Line label="Кредиты / проценты" value={d.financing_other} sign="minus" indent lineKey="financing" onDrill={onDrill} />
+            {Object.keys(d.financing_articles || {}).length ? (
+              Object.entries(d.financing_articles).map(([k, a]) => (
+                <Line key={k} label={a.label} sub={a.count ? `${a.count} опер.` : null} value={a.amount} sign="minus" indent />
+              ))
+            ) : (
+              <Line label="Займы / прочее финансовое" value={d.financing_other} sign="minus" indent lineKey="financing" onDrill={onDrill} />
+            )}
             {Number(d.net_transfers || 0) !== 0 && (
               <>
                 <Line label="Переводы и конвертации" value={d.net_transfers} strong level />
@@ -294,5 +345,45 @@ function CashFlow({ data, onDrill }) {
       )}
     </div>
     </>
+  )
+}
+
+function MonthlyTable({ data, report }) {
+  const months = (data && data.months) || []
+  const rows = MONTHLY_ROWS[report] || MONTHLY_ROWS.pnl
+  if (!months.length) {
+    return <div className="card"><EmptyState>Нет данных за период.</EmptyState></div>
+  }
+  return (
+    <div className="card">
+      <div className="card-header">
+        <span className="card-title">{report === 'cashflow' ? 'ОДДС' : 'ООПИУ'} — помесячно</span>
+      </div>
+      <p className="caption" style={{ margin: '0 0 12px' }}>
+        Каждый месяц периода — отдельной колонкой. Расширьте диапазон дат, чтобы видеть больше месяцев.
+      </p>
+      <div className="table-wrap">
+        <table className="table" style={{ minWidth: 0 }}>
+          <thead>
+            <tr>
+              <th>Статья</th>
+              {months.map((m) => <th key={m.month} className="num">{fmtMonth(m.month)}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(([k, label, neg]) => (
+              <tr key={k}>
+                <td>{label}</td>
+                {months.map((m) => (
+                  <td key={m.month} className={`num ${neg ? 'neg' : signClass(m[k])}`}>
+                    {neg ? '−' : ''}{money(m[k])}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   )
 }

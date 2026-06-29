@@ -10,11 +10,12 @@ from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 
 from accounts.permissions import DenyOperator, IsAdmin
-from .models import Account, AppSettings, Expense, Transfer
+from .models import Account, AppSettings, Expense, OtherIncome, Transfer
 from .reports import (
     accounts_snapshot,
     breakdown,
     build_cashflow,
+    build_monthly,
     build_pnl,
     business_orders,
     debts_summary,
@@ -24,6 +25,7 @@ from .serializers import (
     AccountSerializer,
     AppSettingsSerializer,
     ExpenseSerializer,
+    OtherIncomeSerializer,
     TransferSerializer,
 )
 
@@ -130,6 +132,29 @@ class ExpenseViewSet(viewsets.ModelViewSet):
         serializer.save(created_by=self.request.user)
 
 
+class OtherIncomeViewSet(viewsets.ModelViewSet):
+    serializer_class = OtherIncomeSerializer
+    permission_classes = [DenyOperator]
+
+    def get_queryset(self):
+        qs = OtherIncome.objects.select_related("account").all()
+        date_from, date_to, _ = _period_params(self.request)
+        module = self.request.query_params.get("module")
+        account = self.request.query_params.get("account")
+        if date_from:
+            qs = qs.filter(date__gte=date_from)
+        if date_to:
+            qs = qs.filter(date__lte=date_to)
+        if module:
+            qs = qs.filter(account__module=module)
+        if account:
+            qs = qs.filter(account_id=account)
+        return qs
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
+
 class TransferViewSet(viewsets.ModelViewSet):
     serializer_class = TransferSerializer
     permission_classes = [DenyOperator]
@@ -174,13 +199,45 @@ def pnl_report(request):
     return Response(build_pnl(date_from, date_to, payment, tax_rate=tax_rate, module=module))
 
 
-@extend_schema(parameters=PERIOD_PARAMS, responses=OpenApiTypes.OBJECT, tags=["reports"])
+@extend_schema(
+    parameters=PERIOD_PARAMS
+    + [OpenApiParameter("opening", OpenApiTypes.NUMBER, description="Остаток на начало вручную (перенос с прошлого месяца)")],
+    responses=OpenApiTypes.OBJECT,
+    tags=["reports"],
+)
 @api_view(["GET"])
 @permission_classes([DenyOperator])
 def cashflow_report(request):
     date_from, date_to, payment = _period_params(request)
     module = request.query_params.get("module") or None
-    return Response(build_cashflow(date_from, date_to, payment, module=module))
+    opening_override = None
+    raw = request.query_params.get("opening")
+    if raw not in (None, ""):
+        try:
+            opening_override = Decimal(str(raw))
+        except (InvalidOperation, ValueError, TypeError):
+            opening_override = None
+    return Response(build_cashflow(date_from, date_to, payment, module=module, opening_override=opening_override))
+
+
+@extend_schema(
+    parameters=PERIOD_PARAMS
+    + [
+        OpenApiParameter("module", OpenApiTypes.STR, enum=["EXPRESS", "BUSINESS"], description="Направление"),
+        OpenApiParameter("report", OpenApiTypes.STR, enum=["pnl", "cashflow"], description="Какой отчёт разбить по месяцам"),
+    ],
+    responses=OpenApiTypes.OBJECT,
+    tags=["reports"],
+)
+@api_view(["GET"])
+@permission_classes([DenyOperator])
+def monthly_report(request):
+    date_from, date_to, _ = _period_params(request)
+    module = request.query_params.get("module") or None
+    report = request.query_params.get("report", "pnl")
+    if report not in ("pnl", "cashflow"):
+        report = "pnl"
+    return Response(build_monthly(date_from, date_to, module=module, report=report))
 
 
 @extend_schema(
