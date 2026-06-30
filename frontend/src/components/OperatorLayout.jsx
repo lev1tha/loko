@@ -1,12 +1,15 @@
-import { Outlet } from 'react-router-dom'
+import { NavLink, Outlet } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { IconLogout } from './icons'
 
-// Минимальная оболочка для роли «Сотрудник»: только шапка с выходом и форма
-// добавления продажи. Никакой навигации, финансов и других разделов.
+// Минимальная оболочка для роли «Сотрудник»: шапка с выходом, верхняя навигация
+// (две вкладки: новая продажа / мои продажи) и контент. Никаких финансов и
+// других разделов.
 export default function OperatorLayout() {
   const { user, logout } = useAuth()
   const name = [user?.first_name, user?.last_name].filter(Boolean).join(' ') || user?.username
+
+  const linkClass = ({ isActive }) => `operator-nav-link ${isActive ? 'is-active' : ''}`
 
   return (
     <div className="operator-shell">
@@ -15,7 +18,7 @@ export default function OperatorLayout() {
           <div className="brand-mark">L</div>
           <div className="brand-text">
             <strong>Loko Express</strong>
-            <span>Добавление продаж</span>
+            <span>Кабинет сотрудника</span>
           </div>
         </div>
         <div className="operator-user">
@@ -25,6 +28,15 @@ export default function OperatorLayout() {
           </button>
         </div>
       </header>
+
+      <nav className="operator-nav">
+        <NavLink to="/" end className={linkClass}>
+          Новая продажа
+        </NavLink>
+        <NavLink to="/my-sales" className={linkClass}>
+          Мои продажи
+        </NavLink>
+      </nav>
 
       <main className="operator-main">
         <Outlet />

@@ -1,6 +1,7 @@
 from decimal import Decimal, InvalidOperation
 
 from django.db.models import Count, Sum
+from django.utils import timezone
 from rest_framework import serializers, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -158,6 +159,71 @@ class SaleViewSet(viewsets.ModelViewSet):
             module="EXPRESS", currency="KGS", is_active=True
         ).order_by("name")
         return Response([{"id": a.id, "name": a.name, "kind": a.kind} for a in qs])
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                "export", OpenApiTypes.STR, enum=["xlsx"],
+                description="Формат выгрузки: xlsx — файл Excel; иначе JSON",
+            )
+        ],
+        responses=OpenApiTypes.OBJECT,
+    )
+    @action(detail=False, methods=["get"], url_path="mine")
+    def mine(self, request):
+        """Свои продажи сотрудника (все, новые сверху).
+
+        Возвращает ТОЛЬКО продажи, созданные этим пользователем (``created_by``).
+        ``?export=xlsx`` отдаёт файл Excel. Узкий OperatorSaleSerializer
+        не раскрывает себестоимость/маржу (как и при создании).
+        """
+        qs = (
+            Sale.objects.filter(created_by=request.user)
+            .select_related("account")
+            .order_by("-created_at")
+        )
+        if request.query_params.get("export") == "xlsx":
+            return self._mine_xlsx(qs)
+        total = qs.aggregate(s=Sum("price_som"))["s"] or ZERO
+        data = self.get_serializer(qs, many=True).data
+        return Response({"count": qs.count(), "total_som": total, "results": data})
+
+    @staticmethod
+    def _mine_xlsx(qs):
+        """Выгрузка «моих продаж за сутки» в .xlsx (openpyxl)."""
+        from django.http import HttpResponse
+        from openpyxl import Workbook
+        from openpyxl.styles import Font
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Мои продажи"
+        ws.append(["Дата", "Время", "Код клиента", "Режим", "Вес, кг", "Кол-во", "Сумма, сом", "Счёт"])
+        for cell in ws[1]:
+            cell.font = Font(bold=True)
+        for s in qs:
+            dt = s.created_at
+            if timezone.is_aware(dt):
+                dt = timezone.localtime(dt)
+            ws.append([
+                dt.strftime("%d.%m.%Y"),
+                dt.strftime("%H:%M"),
+                s.client_code,
+                s.get_amount_mode_display(),
+                float(s.weight_kg) if s.weight_kg is not None else None,
+                s.places,
+                float(s.price_som or 0),
+                s.account.name,
+            ])
+        for col, width in zip("ABCDEFGH", (12, 8, 16, 16, 10, 8, 12, 18)):
+            ws.column_dimensions[col].width = width
+
+        resp = HttpResponse(
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        resp["Content-Disposition"] = 'attachment; filename="my-sales.xlsx"'
+        wb.save(resp)
+        return resp
 
 
 @extend_schema_view(

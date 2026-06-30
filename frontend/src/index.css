@@ -554,6 +554,50 @@ textarea.input { height: auto; padding: 10px 14px; resize: vertical; min-height:
 .operator-card-head { margin-bottom: var(--s-md); }
 .operator-card-head .muted { margin: 4px 0 0; font-size: 13px; }
 
+/* Верхняя навигация оболочки сотрудника (вкладки: новая продажа / мои продажи). */
+.operator-nav {
+  display: flex;
+  gap: 4px;
+  padding: 8px clamp(16px, 4vw, 32px);
+  background: var(--canvas);
+  border-bottom: 1px solid var(--hairline);
+}
+.operator-nav-link {
+  padding: 8px 14px;
+  border-radius: var(--r-md);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--muted);
+  text-decoration: none;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.operator-nav-link:hover { background: var(--surface-card); color: var(--ink); }
+.operator-nav-link.is-active { background: var(--primary); color: var(--on-primary); }
+
+/* Список «мои продажи». */
+.operator-sales-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.operator-sales-sub { margin: 4px 0 0; font-size: 13px; }
+.operator-sales { display: flex; flex-direction: column; }
+.operator-sales-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--hairline);
+}
+.operator-sales-row:first-child { border-top: 0; }
+.operator-sales-main { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.operator-sales-code { font-weight: 600; color: var(--ink); }
+.operator-sales-meta { font-size: 12px; color: var(--muted); }
+.operator-sales-sum { font-weight: 600; color: var(--ink); white-space: nowrap; }
+
 /* Директорские отчёты — центрированная колонка (как контент у админа), а не
    прижатая к левому краю на всю ширину экрана. */
 .operator-main-wide {
