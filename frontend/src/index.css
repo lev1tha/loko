@@ -192,6 +192,18 @@ h1, h2, h3, h4 {
 .input::placeholder { color: var(--muted-soft); }
 textarea.input { height: auto; padding: 10px 14px; resize: vertical; min-height: 72px; }
 
+/* iOS Safari авто-зумит при фокусе на поле ввода с font-size < 16px. На сенсорных
+   устройствах поднимаем контролы до 16px, чтобы зум не срабатывал. Десктоп-вид не
+   меняется; viewport не трогаем — пинч-зум остаётся доступен (доступность). */
+@media (pointer: coarse) {
+  .input,
+  .select,
+  textarea.input,
+  .input-cell {
+    font-size: 16px;
+  }
+}
+
 /* ===== Cards ===== */
 .card {
   background: var(--canvas);
