@@ -171,14 +171,17 @@ class SaleViewSet(viewsets.ModelViewSet):
     )
     @action(detail=False, methods=["get"], url_path="mine")
     def mine(self, request):
-        """Свои продажи сотрудника (все, новые сверху).
+        """Свои продажи сотрудника за ТЕКУЩИЙ месяц (новые сверху).
 
-        Возвращает ТОЛЬКО продажи, созданные этим пользователем (``created_by``).
-        ``?export=xlsx`` отдаёт файл Excel. Узкий OperatorSaleSerializer
-        не раскрывает себестоимость/маржу (как и при создании).
+        Возвращает продажи, созданные этим пользователем (``created_by``), с начала
+        текущего календарного месяца (по локальному времени). ``?export=xlsx``
+        отдаёт файл Excel. Узкий OperatorSaleSerializer не раскрывает
+        себестоимость/маржу (как и при создании).
         """
+        now_local = timezone.localtime(timezone.now())
+        month_start = now_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         qs = (
-            Sale.objects.filter(created_by=request.user)
+            Sale.objects.filter(created_by=request.user, created_at__gte=month_start)
             .select_related("account")
             .order_by("-created_at")
         )
@@ -190,7 +193,7 @@ class SaleViewSet(viewsets.ModelViewSet):
 
     @staticmethod
     def _mine_xlsx(qs):
-        """Выгрузка «моих продаж за сутки» в .xlsx (openpyxl)."""
+        """Выгрузка «моих продаж за месяц» в .xlsx (openpyxl)."""
         from django.http import HttpResponse
         from openpyxl import Workbook
         from openpyxl.styles import Font

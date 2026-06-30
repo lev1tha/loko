@@ -62,7 +62,7 @@ export default function OperatorMySales() {
         <div>
           <h2 className="card-title">Мои продажи</h2>
           <p className="muted operator-sales-sub">
-            Все ваши продажи
+            За текущий месяц
             {data.count > 0 && ` · ${data.count} шт · ${som(data.total_som)}`}
           </p>
         </div>
@@ -79,7 +79,7 @@ export default function OperatorMySales() {
       {error && <Alert kind="error">{error}</Alert>}
 
       {!data.results.length ? (
-        <p className="muted" style={{ margin: 0 }}>Продаж пока нет.</p>
+        <p className="muted" style={{ margin: 0 }}>В этом месяце продаж пока нет.</p>
       ) : (
         <div className="operator-sales">
           {data.results.map((s) => (
