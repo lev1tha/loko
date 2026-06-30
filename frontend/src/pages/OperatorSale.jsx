@@ -20,7 +20,10 @@ const MODES = [
 // Видна ИСКЛЮЧИТЕЛЬНО общая стоимость — без маржи, себестоимости и дебиторки.
 export default function OperatorSale() {
   const accountsReq = useFetch('/sales/accounts/')
-  const accounts = asList(accountsReq.data)
+  // «МБанк» исключён из выбора счёта на странице сотрудника (по требованию).
+  const accounts = asList(accountsReq.data).filter(
+    (a) => !/mbank|мбанк/i.test(a.name || ''),
+  )
 
   const [mode, setMode] = useState('DIRECT')
   const [clientCode, setClientCode] = useState('')
@@ -38,10 +41,10 @@ export default function OperatorSale() {
   const [saving, setSaving] = useState(false)
   const codeRef = useRef(null)
 
-  // Вес одного места × кол-во мест = итоговый вес груза (режим «по весу»).
-  const perPlace = parseFloat(weight) || 0
+  // Вес груза (режим «по весу»). «Количество» — отдельный учётный показатель и
+  // НЕ влияет на цену: вес на количество НЕ умножается.
+  const weightNum = parseFloat(weight) || 0
   const placesN = parseInt(places, 10) || 1
-  const totalWeight = Number((perPlace * placesN).toFixed(3))
 
   // Ставка за 1 кг (для режима «прямая сумма»: вес = сумма ÷ ставка).
   useEffect(() => {
@@ -59,7 +62,7 @@ export default function OperatorSale() {
   // Живой расчёт общей стоимости по ИТОГОВОМУ весу (без себестоимости/маржи).
   useEffect(() => {
     if (mode !== 'WEIGHT') return
-    if (!(totalWeight > 0)) {
+    if (!(weightNum > 0)) {
       setQuote(null)
       return
     }
@@ -68,7 +71,7 @@ export default function OperatorSale() {
       // client_code — чтобы итог посчитался по спец-цене клиента (если задана).
       // Саму цену сотрудник не видит, только «Общую стоимость».
       api
-        .post('/sales/quote/', { weight_kg: totalWeight, client_code: clientCode.trim() })
+        .post('/sales/quote/', { weight_kg: weightNum, client_code: clientCode.trim() })
         .then((res) => active && setQuote(res.data))
         .catch(() => active && setQuote(null))
     }, 250)
@@ -76,7 +79,7 @@ export default function OperatorSale() {
       active = false
       clearTimeout(t)
     }
-  }, [totalWeight, mode, clientCode])
+  }, [weightNum, mode, clientCode])
 
   const directNum = parseFloat(directAmount) || 0
   // Расчётный вес для «прямой суммы» — только показ, не редактируется (2 знака).
@@ -85,7 +88,7 @@ export default function OperatorSale() {
   const uniqueNum = parseFloat(uniquePrice) || 0
   const hasUnique = uniqueNum > 0
   // Вес-основа: «по весу» — итоговый вес; «прямая сумма» — расчётный вес из суммы.
-  const baseWeight = mode === 'WEIGHT' ? totalWeight : derivedWeight
+  const baseWeight = mode === 'WEIGHT' ? weightNum : derivedWeight
   // Общая стоимость: с уникальной ценой = вес × цена; иначе по весу из расчёта / введённая сумма.
   const total = hasUnique && baseWeight > 0
     ? Number((baseWeight * uniqueNum).toFixed(2))
@@ -104,8 +107,8 @@ export default function OperatorSale() {
       setError('Нет доступного счёта зачисления — обратитесь к администратору.')
       return
     }
-    if (mode === 'WEIGHT' && !(totalWeight > 0)) {
-      setError('Укажите вес места больше нуля.')
+    if (mode === 'WEIGHT' && !(weightNum > 0)) {
+      setError('Укажите вес больше нуля.')
       return
     }
     if (mode === 'DIRECT' && !(directNum > 0)) {
@@ -133,8 +136,8 @@ export default function OperatorSale() {
         body.price_som = (baseWeight * uniqueNum).toFixed(2)
         body.weight_kg = baseWeight
       } else if (mode === 'WEIGHT') {
-        // Итоговый вес груза (вес места × мест).
-        body.weight_kg = totalWeight > 0 ? totalWeight : null
+        // Вес груза (количество на вес/цену не влияет).
+        body.weight_kg = weightNum > 0 ? weightNum : null
       } else {
         // «Прямая сумма»: сумма вводится, вес — только расчётный показ (не пишем).
         body.price_som = directAmount
@@ -206,36 +209,17 @@ export default function OperatorSale() {
         </Field>
 
         {mode === 'WEIGHT' ? (
-          <>
-            <div className="row row-wrap">
-              <Field label="Вес одного места, кг" hint="Умножается на количество мест">
-                <input
-                  className="input"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={weight}
-                  onChange={(e) => setWeight(e.target.value)}
-                  placeholder="5"
-                />
-              </Field>
-              <Field label="Кол-во мест" hint="Напр. 2 коробки">
-                <input
-                  className="input"
-                  type="number"
-                  min="1"
-                  value={places}
-                  onChange={(e) => setPlaces(e.target.value)}
-                  onBlur={() => setPlaces(String(Math.max(1, parseInt(places, 10) || 1)))}
-                />
-              </Field>
-            </div>
-            {totalWeight > 0 && (
-              <div className="caption">
-                Итого вес: <strong>{kg(totalWeight)}</strong> ({perPlace} кг × {placesN} мест)
-              </div>
-            )}
-          </>
+          <Field label="Вес, кг" hint="Итоговый вес груза">
+            <input
+              className="input"
+              type="number"
+              step="0.01"
+              min="0"
+              value={weight}
+              onChange={(e) => setWeight(e.target.value)}
+              placeholder="5"
+            />
+          </Field>
         ) : (
           <div className="row row-wrap">
             <Field label="Сумма, сом" hint="Вводится напрямую">
@@ -261,6 +245,17 @@ export default function OperatorSale() {
             </Field>
           </div>
         )}
+
+        <Field label="Количество" hint="Для учёта — на цену не влияет">
+          <input
+            className="input"
+            type="number"
+            min="1"
+            value={places}
+            onChange={(e) => setPlaces(e.target.value)}
+            onBlur={() => setPlaces(String(Math.max(1, parseInt(places, 10) || 1)))}
+          />
+        </Field>
 
         <div className="field">
           <button
