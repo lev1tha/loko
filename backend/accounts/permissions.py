@@ -66,8 +66,9 @@ class SalesAccess(BasePermission):
     """Sales endpoint access.
 
     * Admin / Manager — full access (list, edit, delete, summary, …).
-    * Operator («Сотрудник») — may ONLY create a sale, request a price quote
-      and read the minimal Express-account picker. No list / edit / delete /
+    * Operator («Сотрудник») — may ONLY create a sale, request a price quote,
+      read the minimal Express-account picker, and list HIS OWN sales of the
+      last 24h (``mine``, + Excel export). No global list / edit / delete /
       summary, so no financial figures (revenue, margin, debtors) are exposed.
     * Director («Директор») — no access at all (read-only reports only).
     """
@@ -75,7 +76,9 @@ class SalesAccess(BasePermission):
     message = "Сотрудник может только добавлять продажи."
 
     # ViewSet actions an operator is allowed to perform.
-    OPERATOR_ACTIONS = frozenset({"create", "quote", "express_accounts"})
+    # ``mine`` — свои продажи за последние сутки (+ выгрузка в Excel); финансовых
+    # полей других продаж и сводных цифр он по-прежнему не видит.
+    OPERATOR_ACTIONS = frozenset({"create", "quote", "express_accounts", "mine"})
 
     def has_permission(self, request, view):
         user = request.user

@@ -37,6 +37,20 @@ export function dateRu(value) {
   return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
+// Дата+время (для списка «мои продажи»): «30.06.2026, 21:10».
+export function dateTimeRu(value) {
+  if (!value) return '—'
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return value
+  return d.toLocaleString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 // Local YYYY-MM-DD (avoids the UTC shift of toISOString in +/- timezones).
 function localISO(d) {
   const y = d.getFullYear()

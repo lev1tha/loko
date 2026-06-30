@@ -13,6 +13,7 @@ import Sales from './pages/Sales'
 import ClientPrices from './pages/ClientPrices'
 import OtherIncome from './pages/OtherIncome'
 import OperatorSale from './pages/OperatorSale'
+import OperatorMySales from './pages/OperatorMySales'
 import Expenses from './pages/Expenses'
 import Accounts from './pages/Accounts'
 import Transfers from './pages/Transfers'
@@ -55,6 +56,7 @@ function AppRoutes() {
           }
         >
           <Route index element={<OperatorSale />} />
+          <Route path="my-sales" element={<OperatorMySales />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
