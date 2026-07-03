@@ -21,6 +21,8 @@ const VIEWS = [
   { value: 'period', label: 'За период' },
   { value: 'monthly', label: 'Помесячно' },
 ]
+// Финансовые статьи-ПРИТОКИ (получение займа, вклад собственника) — в ОДДС со знаком «+».
+const FIN_INFLOW = ['LOAN_RECEIVED', 'OWNER_CONTRIB']
 const MONTHS_RU = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек']
 const fmtMonth = (m) => { const [y, mo] = String(m).split('-'); return `${MONTHS_RU[Number(mo) - 1] || mo} ${y}` }
 const MONTHLY_ROWS = {
@@ -302,8 +304,13 @@ function CashFlow({ data, onDrill }) {
             )}
             <Line label="Итого от инвестиционной деятельности" value={d.net_investing} strong level />
             <Line label="Финансовая деятельность" strong />
+            {/* Притоки: получение займа, вклад собственника */}
+            {Object.entries(d.financing_articles || {}).filter(([k]) => FIN_INFLOW.includes(k)).map(([k, a]) => (
+              <Line key={k} label={a.label} sub={a.count ? `${a.count} опер.` : null} value={a.amount} sign="plus" indent />
+            ))}
+            {/* Оттоки: изъятие, выплата тела/процентов, налог */}
             <Line label="Изъятие собственника" value={d.owner_withdrawals} sign="minus" indent lineKey="owner" onDrill={onDrill} />
-            {Object.entries(d.financing_articles || {}).map(([k, a]) => (
+            {Object.entries(d.financing_articles || {}).filter(([k]) => !FIN_INFLOW.includes(k)).map(([k, a]) => (
               <Line key={k} label={a.label} sub={a.count ? `${a.count} опер.` : null} value={a.amount} sign="minus" indent />
             ))}
             <Line label="Выплата налога на прибыль" value={d.profit_tax} sign="minus" indent />

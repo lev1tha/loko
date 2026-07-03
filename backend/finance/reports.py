@@ -24,6 +24,7 @@ from .models import (
     OPERATING_ARTICLES,
     INVESTING_ARTICLES,
     FINANCING_ARTICLES,
+    FINANCING_INFLOW_ARTICLES,
     kgs_of,
 )
 
@@ -309,12 +310,20 @@ def _consolidated_cash(upper_date, inclusive, module=None, kinds=None):
         # Депозиты и расходы — по снапшот-курсу (группировка по курсу).
         for g in filt(acc.deposits, "date").values("currency", "kgs_rate").annotate(s=Sum("amount")):
             total += kgs_of(g["s"] or ZERO, g["currency"], g["kgs_rate"])
+        exp_paid = filt(acc.expenses, "payment_date")
         for g in (
-            filt(acc.expenses, "payment_date")
+            exp_paid.exclude(opex_article__in=FINANCING_INFLOW_ARTICLES)
             .values("account__currency", "kgs_rate")
             .annotate(s=Sum("paid_amount"))
         ):
             total -= kgs_of(g["s"] or ZERO, g["account__currency"], g["kgs_rate"])
+        # Финансовые притоки (получение займа / вклад собственника) — прибавляем.
+        for g in (
+            exp_paid.filter(opex_article__in=FINANCING_INFLOW_ARTICLES)
+            .values("account__currency", "kgs_rate")
+            .annotate(s=Sum("paid_amount"))
+        ):
+            total += kgs_of(g["s"] or ZERO, g["account__currency"], g["kgs_rate"])
         # Переводы: каждая нога по снапшот-курсу своей стороны (kgs_in/kgs_out).
         for t in filt(acc.incoming_transfers, "date").select_related("to_account", "from_account"):
             total += t.kgs_in
@@ -349,12 +358,15 @@ def build_cashflow(date_from=None, date_to=None, payment="all", module=None, ope
     investing_articles = _accrual_articles(date_from, date_to, kinds, ExpenseCategory.INVEST, INVESTING_ARTICLES, module)
     net_investing = -invest_total
 
-    # --- Финансовая деятельность (изъятие собственника + кредиты + налог) --
+    # --- Финансовая деятельность --------------------------------------------
+    # Притоки: получение займа, вклад собственника. Оттоки: изъятие собственника,
+    # выплата тела/процентов займа, выплата налога на прибыль.
     owner, owner_cnt = _expense_accrual(date_from, date_to, kinds, ExpenseCategory.OWNER, module=module)
-    financing_exp, fin_cnt = _expense_accrual(date_from, date_to, kinds, ExpenseCategory.FINANCING, module=module)
     financing_articles = _accrual_articles(date_from, date_to, kinds, ExpenseCategory.FINANCING, FINANCING_ARTICLES, module)
-    financing_outflow = owner + financing_exp + profit_tax
-    net_financing = -financing_outflow
+    financing_inflow = sum((v["amount"] for k, v in financing_articles.items() if k in FINANCING_INFLOW_ARTICLES), ZERO)
+    financing_loan_out = sum((v["amount"] for k, v in financing_articles.items() if k not in FINANCING_INFLOW_ARTICLES), ZERO)
+    financing_outflow = owner + financing_loan_out + profit_tax
+    net_financing = financing_inflow - financing_outflow
 
     net_cash_flow = net_operating + net_investing + net_financing
 
@@ -366,6 +378,7 @@ def build_cashflow(date_from=None, date_to=None, payment="all", module=None, ope
         opening = _consolidated_cash(date_from, inclusive=False, module=module, kinds=kinds)
     closing = opening + net_cash_flow
 
+    fin_cnt = sum((v["count"] for v in financing_articles.values()), 0)
     expense_count = pnl["opex_count"] + inv_cnt + owner_cnt + fin_cnt
 
     return {
@@ -384,8 +397,9 @@ def build_cashflow(date_from=None, date_to=None, payment="all", module=None, ope
         "net_investing": net_investing,
         "investing_articles": investing_articles,
         # Финансовая
+        "financing_inflow": financing_inflow,
         "owner_withdrawals": owner,
-        "financing_other": financing_exp,
+        "financing_loan_out": financing_loan_out,
         "profit_tax": profit_tax,
         "financing_outflow": financing_outflow,
         "net_financing": net_financing,
@@ -723,11 +737,15 @@ def journal(date_from=None, date_to=None, module=None, effect_filter=None, limit
         exp = exp.filter(account__module=module)
     for e in _between(exp, date_from, date_to, "date"):
         typ, effect = EXP_MAP.get(e.category, ("Расход", "Прочее"))
+        flow = "out"
         # Express: себестоимость в ОПиУ — расчётная (% от выручки), а фактические
         # карго-оттоки показываем как кассовое движение (в прибыль ОПиУ не входят).
         if e.category == ExpenseCategory.COGS and e.account.module == "EXPRESS":
             typ, effect = "Карго-оплата (касса)", "Себестоимость (касса)"
-        add(e.date, typ, e.description or typ, e.account.name, e.amount, e.account.currency, "out", effect, f"E-{e.id}", e.account.module, e.kgs_amount)
+        # Финансовые притоки (получение займа / вклад собственника) — деньги ПРИХОДЯТ.
+        elif e.category == ExpenseCategory.FINANCING and e.opex_article in FINANCING_INFLOW_ARTICLES:
+            typ, effect, flow = e.get_opex_article_display(), "Финансовый приток", "in"
+        add(e.date, typ, e.description or typ, e.account.name, e.amount, e.account.currency, flow, effect, f"E-{e.id}", e.account.module, e.kgs_amount)
 
     # Express: расчётная себестоимость (% от выручки, как в ОПиУ) — одной строкой,
     # чтобы журнал сходился с дашбордом по прибыли.

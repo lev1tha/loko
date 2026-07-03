@@ -44,6 +44,10 @@ export const ARTICLES_BY_CAT = {
   ],
 }
 export const OPEX_ARTICLES = ARTICLES_BY_CAT.OPEX
+// Финансовые статьи-ПРИТОКИ: деньги приходят на счёт (получение займа, вклад
+// собственника). В списке — со знаком «+», в отчётах — приток финансовой деят.
+export const FIN_INFLOW_ARTICLES = ['LOAN_RECEIVED', 'OWNER_CONTRIB']
+const isInflow = (e) => e.category === 'FINANCING' && FIN_INFLOW_ARTICLES.includes(e.opex_article)
 
 const CAT_HINT = {
   OPEX: 'Влияет на ООПИУ и ОДДС',
@@ -164,8 +168,8 @@ export default function Expenses({ lockedModule = null }) {
                     <td><Badge>{e.category_display}</Badge></td>
                     <td className="muted">{e.opex_article_display || '—'}</td>
                     <td>{e.account_name}</td>
-                    <td className="num neg">
-                      −{money(e.amount, e.account_currency)}
+                    <td className={`num ${isInflow(e) ? 'pos' : 'neg'}`}>
+                      {isInflow(e) ? '+' : '−'}{money(e.amount, e.account_currency)}
                       {e.account_currency === 'CNY' && <div className="caption muted">≈ {money(e.amount_kgs)}</div>}
                     </td>
                     <td className="num">
@@ -224,6 +228,7 @@ function ExpenseForm({ editing, accounts, onClose, onSaved }) {
   const [saving, setSaving] = useState(false)
 
   const articles = ARTICLES_BY_CAT[category] || null
+  const articleIsInflow = category === 'FINANCING' && FIN_INFLOW_ARTICLES.includes(article)
   const commentRequired = category === 'OPEX' && article === 'OTHER'
   const acc = accounts.find((a) => String(a.id) === String(accountId))
 
@@ -286,7 +291,10 @@ function ExpenseForm({ editing, accounts, onClose, onSaved }) {
         </Field>
 
         {articles && (
-          <Field label="Статья расхода">
+          <Field
+            label="Статья расхода"
+            hint={articleIsInflow ? '💰 Приток: деньги ПРИХОДЯТ на счёт (баланс растёт), это не расход' : undefined}
+          >
             <select className="select" value={article} onChange={(e) => setArticle(e.target.value)}>
               {articles.map((a) => (
                 <option key={a.value} value={a.value}>{a.label}</option>

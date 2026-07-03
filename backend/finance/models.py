@@ -201,7 +201,21 @@ class Account(models.Model):
 
     def expense_total(self) -> Decimal:
         # Cash actually paid out (paid_amount), not the accrued amount.
-        agg = self.expenses.aggregate(s=Sum("paid_amount"))["s"]
+        # «Приточные» финансовые статьи (получение займа / вклад собственника)
+        # НЕ оттоки — деньги приходят на счёт, их считаем отдельно (см. ниже).
+        agg = (
+            self.expenses.exclude(opex_article__in=FINANCING_INFLOW_ARTICLES)
+            .aggregate(s=Sum("paid_amount"))["s"]
+        )
+        return agg or Decimal("0")
+
+    def financing_inflow_total(self) -> Decimal:
+        # Финансовые ПРИТОКИ, лежащие в модели расходов по смыслу спецификации:
+        # получение займа, вклад собственника — деньги ПРИХОДЯТ на счёт.
+        agg = (
+            self.expenses.filter(opex_article__in=FINANCING_INFLOW_ARTICLES)
+            .aggregate(s=Sum("paid_amount"))["s"]
+        )
         return agg or Decimal("0")
 
     def transfers_in_total(self) -> Decimal:
@@ -222,12 +236,13 @@ class Account(models.Model):
 
     @property
     def current_balance(self) -> Decimal:
-        """Начальный + Доходы + Прочий доход + Депозиты − Расходы +/− Перемещения."""
+        """Начальный + Доходы + Прочий доход + Депозиты + Фин.притоки − Расходы +/− Перемещения."""
         return (
             self.initial_balance
             + self.income_total()
             + self.other_income_total()
             + self.deposit_total()
+            + self.financing_inflow_total()
             - self.expense_total()
             + self.transfers_in_total()
             - self.transfers_out_total()
@@ -250,7 +265,11 @@ class Account(models.Model):
         for d in self.deposits.all():
             total += d.kgs_value
         for e in self.expenses.all():
-            total -= e.kgs_paid
+            # Получение займа / вклад собственника — приток (деньги приходят).
+            if e.opex_article in FINANCING_INFLOW_ARTICLES:
+                total += e.kgs_paid
+            else:
+                total -= e.kgs_paid
         for t in self.incoming_transfers.select_related("to_account", "from_account"):
             total += t.kgs_in
         for t in self.outgoing_transfers.select_related("to_account", "from_account"):
@@ -298,6 +317,16 @@ INVESTING_ARTICLES = frozenset({
 })
 FINANCING_ARTICLES = frozenset({
     ExpenseArticle.LOAN_RECEIVED, ExpenseArticle.OWNER_CONTRIB,
+    ExpenseArticle.LOAN_PRINCIPAL, ExpenseArticle.LOAN_INTEREST,
+})
+# Финансовая деятельность делится на притоки и оттоки. Модель Expense хранит и те,
+# и другие; «приточные» статьи ниже трактуются как ПОСТУПЛЕНИЕ денег на счёт
+# (получение займа, вклад собственника), а не как отток. Остальные финансовые
+# (выплата тела/процентов) + «Изъятие собственника» (категория OWNER) — оттоки.
+FINANCING_INFLOW_ARTICLES = frozenset({
+    ExpenseArticle.LOAN_RECEIVED, ExpenseArticle.OWNER_CONTRIB,
+})
+FINANCING_OUTFLOW_ARTICLES = frozenset({
     ExpenseArticle.LOAN_PRINCIPAL, ExpenseArticle.LOAN_INTEREST,
 })
 
