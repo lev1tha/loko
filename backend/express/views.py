@@ -95,6 +95,53 @@ class SaleViewSet(viewsets.ModelViewSet):
         )
 
     @extend_schema(
+        parameters=[
+            OpenApiParameter("from", OpenApiTypes.DATE, description="Начало периода"),
+            OpenApiParameter("to", OpenApiTypes.DATE, description="Конец периода"),
+        ],
+        responses=OpenApiTypes.OBJECT,
+    )
+    @action(detail=False, methods=["get"], url_path="weight-summary")
+    def weight_summary(self, request):
+        """Общий вес (фактический + расчётный) за отдельный период.
+
+        Виджет с собственным фильтром дат — независим от основного фильтра списка
+        (``from``/``to`` здесь свои). Суммирует явно введённый вес, а для продаж
+        «прямой суммой» без веса — расчётный вес из суммы, ровно как значения «≈»
+        в таблице (см. ``Sale.est_weight_kg``): цена ÷ (цена_за_кг_$ × курс_$).
+        """
+        qs = Sale.objects.all()
+        date_from = request.query_params.get("from")
+        date_to = request.query_params.get("to")
+        if date_from:
+            qs = qs.filter(date__gte=date_from)
+        if date_to:
+            qs = qs.filter(date__lte=date_to)
+        # est_weight_kg — свойство модели (не поле БД), поэтому агрегируем в Python
+        # по тем же полям, что и в таблице → карточка сходится с колонкой «Вес».
+        qs = qs.only("weight_kg", "price_som", "price_per_kg_usd", "usd_rate_som")
+        actual = ZERO  # из явно введённого веса
+        est = ZERO     # расчётный (из суммы) — продажи «прямой суммой» без веса
+        count = 0
+        for sale in qs.iterator():
+            count += 1
+            w = sale.est_weight_kg
+            if w is None:
+                continue
+            if sale.weight_kg is not None:
+                actual += w
+            else:
+                est += w
+        return Response(
+            {
+                "count": count,
+                "weight": actual + est,   # общий вес: факт + расчётный
+                "weight_actual": actual,
+                "weight_est": est,
+            }
+        )
+
+    @extend_schema(
         request=inline_serializer(
             "SaleQuoteRequest",
             {

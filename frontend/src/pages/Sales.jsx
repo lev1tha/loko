@@ -34,6 +34,10 @@ export default function Sales() {
   const [to, setTo] = useState(today())
   const [payment, setPayment] = useState('all')
   const [search, setSearch] = useState('')
+  // Отдельный фильтр дат для карточки «Общий вес» — независим от фильтра списка,
+  // чтобы смотреть тоннаж за конкретный день/период, не сбивая таблицу продаж.
+  const [wFrom, setWFrom] = useState(firstOfMonth())
+  const [wTo, setWTo] = useState(today())
   const [form, setForm] = useState(null) // null=закрыто, 'new', или объект продажи (редактирование)
   const [busyId, setBusyId] = useState(null)
   const [error, setError] = useState('')
@@ -43,11 +47,13 @@ export default function Sales() {
   const params = { from, to, payment, search: search || undefined, page_size: 10000 }
   const sales = useFetch('/sales/', params)
   const summary = useFetch('/sales/summary/', params)
+  const weightSummary = useFetch('/sales/weight-summary/', { from: wFrom, to: wTo })
   const accounts = useFetch('/accounts/', { module: 'EXPRESS' })
 
   const rows = asList(sales.data)
   const total = sales.data?.count ?? rows.length
   const s = summary.data || {}
+  const w = weightSummary.data || {}
 
   // Сортировка по клику на заголовок (по умолчанию — дата по убыванию, как с сервера).
   const [sort, setSort] = useState({ key: 'date', dir: 'desc' })
@@ -62,6 +68,7 @@ export default function Sales() {
   function refresh() {
     sales.reload()
     summary.reload()
+    weightSummary.reload()
   }
 
   async function remove(r) {
@@ -106,11 +113,32 @@ export default function Sales() {
     <>
       {error && <Alert kind="error">{error}</Alert>}
       <div className="grid">
-        <Stat label="Продаж за период" value={s.count || 0} sub={kg(s.weight)} />
+        <Stat label="Продаж за период" value={s.count || 0} />
         <Stat label="Начислено (выручка)" value={som(s.revenue)} />
         <Stat label="Оплачено" value={som(s.paid)} sub="фактический приток" />
         <Stat label="Дебиторка" value={som(s.receivable)} tone={signClass(s.receivable)} sub="не оплачено" />
         <Stat label="Маржа" value={som(s.margin)} tone={signClass(s.margin)} />
+      </div>
+
+      <div className="card weight-card">
+        <div className="spread">
+          <div className="weight-figure">
+            <span className="stat-label">Общий вес за период</span>
+            <span className="weight-value">{weightSummary.loading ? '…' : kg(w.weight)}</span>
+            <span className="stat-sub">
+              {(w.count || 0)} прод.
+              {Number(w.weight_est) > 0 && <> · из них ≈ {kg(w.weight_est)} расчётных</>}
+            </span>
+          </div>
+          <div className="toolbar">
+            <Field label="С даты">
+              <input className="input" type="date" value={wFrom} onChange={(e) => setWFrom(e.target.value)} />
+            </Field>
+            <Field label="По дату">
+              <input className="input" type="date" value={wTo} onChange={(e) => setWTo(e.target.value)} />
+            </Field>
+          </div>
+        </div>
       </div>
 
       <div className="card">

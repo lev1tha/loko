@@ -300,6 +300,20 @@ textarea.input { height: auto; padding: 10px 14px; resize: vertical; min-height:
 }
 .stat-sub { font-size: 13px; color: var(--muted-soft); }
 
+/* Карточка «Общий вес» со своим фильтром дат: крупное число слева, поля дат
+   справа; на узких экранах фильтр переносится под число. */
+.weight-card .spread { flex-wrap: wrap; gap: var(--s-md); }
+.weight-figure { display: flex; flex-direction: column; gap: 6px; }
+.weight-value {
+  font-size: clamp(26px, 2.8vw, 36px);
+  font-weight: 600;
+  color: var(--ink);
+  letter-spacing: var(--display-tracking);
+  font-variant-numeric: tabular-nums;
+}
+.weight-card .toolbar { flex: 0 0 auto; }
+.weight-card .toolbar .field { min-width: 150px; }
+
 /* ===== Generic helpers ===== */
 .row { display: flex; gap: var(--s-md); align-items: center; }
 .row-wrap { flex-wrap: wrap; }
