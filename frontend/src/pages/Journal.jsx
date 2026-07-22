@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useFetch } from '../lib/hooks'
+import { useFetch, asList } from '../lib/hooks'
 import { firstOfMonth, today, money, num, dateRu, signClass } from '../lib/format'
 import { Badge, EmptyState, Field, Segmented, Spinner, Stat } from '../components/ui'
 
@@ -41,18 +41,25 @@ export default function Journal() {
   const [from, setFrom] = useState(firstOfMonth())
   const [to, setTo] = useState(today())
   const [module, setModule] = useState('all')
+  const [branch, setBranch] = useState('') // '' = все филиалы (только Express)
   const [filter, setFilter] = useState(null) // фильтр по «эффекту» (серверный)
   const [offset, setOffset] = useState(0)
 
   // Любая смена среза сбрасывает страницу на первую.
-  const setModuleR = (v) => { setModule(v); setFilter(null); setOffset(0) }
+  const setModuleR = (v) => { setModule(v); setBranch(''); setFilter(null); setOffset(0) }
+  const setBranchR = (v) => { setBranch(v); setFilter(null); setOffset(0) }
   const setFromR = (v) => { setFrom(v); setOffset(0) }
   const setToR = (v) => { setTo(v); setOffset(0) }
   const toggleFilter = (eff) => { setFilter((f) => (f === eff ? null : eff)); setOffset(0) }
 
+  // Филиалы — только для Express.
+  const showBranch = module === 'EXPRESS'
+  const branches = asList(useFetch('/branches/', { active: 1 }).data)
+
   const params = {
     from, to, limit: PAGE, offset,
     ...(module !== 'all' ? { module } : {}),
+    ...(showBranch && branch ? { branch } : {}),
     ...(filter ? { effect: filter } : {}),
   }
   const data = useFetch('/reports/journal/', params)
@@ -88,6 +95,15 @@ export default function Journal() {
             <span className="field-label">Направление</span>
             <Segmented value={module} onChange={setModuleR} options={MODULES} />
           </div>
+          {showBranch && (
+            <div className="field" style={{ alignItems: 'flex-end' }}>
+              <span className="field-label">Филиал</span>
+              <select className="select" value={branch} onChange={(e) => setBranchR(e.target.value)}>
+                <option value="">Все филиалы</option>
+                {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+            </div>
+          )}
         </div>
       </div>
 

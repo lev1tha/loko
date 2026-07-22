@@ -25,6 +25,7 @@ import Calculator from './pages/Calculator'
 import Reports from './pages/Reports'
 import Settings from './pages/Settings'
 import Users from './pages/Users'
+import Branches from './pages/Branches'
 import Guide from './pages/Guide'
 
 export default function App() {
@@ -141,6 +142,14 @@ function AppRoutes() {
           element={
             <ProtectedRoute adminOnly>
               <Users />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="branches"
+          element={
+            <ProtectedRoute adminOnly>
+              <Branches />
             </ProtectedRoute>
           }
         />

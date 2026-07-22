@@ -48,6 +48,9 @@ export function AuthProvider({ children }) {
     // «Директор» — только просмотр ОПиУ/ОДДС своего направления (read-only).
     isDirector: user?.role === 'DIRECTOR',
     directorModule: user?.role === 'DIRECTOR' ? user?.module || null : null,
+    // Филиал сотрудника (Loko Express) — для предзаполнения/показа в форме продажи.
+    userBranch: user?.branch ?? null,
+    userBranchName: user?.branch_name ?? null,
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

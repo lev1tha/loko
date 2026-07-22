@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { useFetch } from '../lib/hooks'
+import { useFetch, asList } from '../lib/hooks'
 import { firstOfMonth, today, money, num, dateRu, signClass } from '../lib/format'
-import { Badge, EmptyState, Field, Modal, Segmented, Spinner, Stat } from '../components/ui'
+import { Alert, Badge, EmptyState, Field, Modal, Segmented, Spinner, Stat } from '../components/ui'
 
 const PAYMENTS = [
   { value: 'all', label: 'Все' },
@@ -48,15 +48,20 @@ export default function Reports({ lockedModule = null }) {
   const [opening, setOpening] = useState('')
   const [view, setView] = useState('period') // 'period' | 'monthly'
   const [drill, setDrill] = useState(null) // { line, label, basis }
+  const [branch, setBranch] = useState('') // '' = все филиалы (только Express)
 
   // На страницах внутри разделов Express/Business направление зафиксировано
   // (проп lockedModule) — переключатель «Направление» скрыт.
   const module = lockedModule || moduleState
   const moduleParam = module !== 'all' ? { module } : {}
-  const pnlParams = { from, to, payment, ...moduleParam, ...(taxRate !== '' ? { tax_rate: taxRate } : {}) }
+  // Филиалы — только для Express: фильтр показываем и branch шлём лишь в этом режиме.
+  const showBranch = module === 'EXPRESS'
+  const branches = asList(useFetch('/branches/', { active: 1 }).data)
+  const branchParam = showBranch && branch ? { branch } : {}
+  const pnlParams = { from, to, payment, ...moduleParam, ...branchParam, ...(taxRate !== '' ? { tax_rate: taxRate } : {}) }
   const pnl = useFetch('/reports/pnl/', pnlParams)
-  const cash = useFetch('/reports/cashflow/', { from, to, payment, ...moduleParam, ...(opening !== '' ? { opening } : {}) })
-  const monthly = useFetch('/reports/monthly/', { from, to, report, ...moduleParam })
+  const cash = useFetch('/reports/cashflow/', { from, to, payment, ...moduleParam, ...branchParam, ...(opening !== '' ? { opening } : {}) })
+  const monthly = useFetch('/reports/monthly/', { from, to, report, ...moduleParam, ...branchParam })
 
   const openDrill = (basis) => (line, label) => setDrill({ line, label, basis })
 
@@ -75,6 +80,14 @@ export default function Reports({ lockedModule = null }) {
               <span className="field-label">Направление</span>
               <Segmented value={module} onChange={setModule} options={MODULES} />
             </div>
+          )}
+          {showBranch && (
+            <Field label="Филиал">
+              <select className="select" value={branch} onChange={(e) => setBranch(e.target.value)}>
+                <option value="">Все филиалы</option>
+                {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+            </Field>
           )}
           <div className="field">
             <span className="field-label">Расчёт</span>
@@ -120,7 +133,7 @@ export default function Reports({ lockedModule = null }) {
       {drill && (
         <BreakdownModal
           {...drill}
-          params={{ from, to, payment, ...moduleParam }}
+          params={{ from, to, payment, ...moduleParam, ...branchParam }}
           onClose={() => setDrill(null)}
         />
       )}
@@ -285,6 +298,12 @@ function CashFlow({ data, onDrill }) {
         Движение по трём видам деятельности. Операционная берётся из ОПиУ (выручка − себестоимость − операционные расходы).
         Остаток на конец = остаток на начало + чистый поток.
       </p>
+      {d.balances_company_wide && (
+        <Alert kind="warning">
+          ⚠️ Остатки на банковских счетах и в кассах ведутся консолидированно по всей компании,
+          так как счета являются общими. По филиалу здесь разбиты только потоки (приходы/расходы).
+        </Alert>
+      )}
       <div className="table-wrap">
         <table className="table" style={{ minWidth: 0 }}>
           <tbody>

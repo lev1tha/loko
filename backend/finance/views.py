@@ -10,7 +10,7 @@ from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 
 from accounts.permissions import DenyOperator, DenyOperatorOrDirector, IsAdmin
-from .models import Account, AppSettings, Expense, OtherIncome, Transfer
+from .models import Account, AppSettings, Branch, Expense, OtherIncome, Transfer
 from .reports import (
     accounts_snapshot,
     breakdown,
@@ -24,6 +24,7 @@ from .reports import (
 from .serializers import (
     AccountSerializer,
     AppSettingsSerializer,
+    BranchSerializer,
     ExpenseSerializer,
     OtherIncomeSerializer,
     TransferSerializer,
@@ -49,12 +50,29 @@ def _scoped_module(request):
     return request.query_params.get("module") or None
 
 
+def _scoped_branch(request):
+    """Филиал Express (тег операций). Возвращает id или None. Игнорируется, когда
+    направление — Business или у директора нет направления (филиал — только Express
+    и не должен обходить scope пользователя)."""
+    module = _scoped_module(request)
+    if module in ("BUSINESS", "__none__"):
+        return None
+    raw = request.query_params.get("branch")
+    if raw in (None, ""):
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
 # Reusable OpenAPI query parameters shared by the report endpoints.
 PERIOD_PARAMS = [
     OpenApiParameter("from", OpenApiTypes.DATE, description="Начало периода (YYYY-MM-DD)"),
     OpenApiParameter("to", OpenApiTypes.DATE, description="Конец периода (YYYY-MM-DD)"),
     OpenApiParameter("payment", OpenApiTypes.STR, enum=["all", "cash", "noncash"], description="Вид оплаты"),
     OpenApiParameter("module", OpenApiTypes.STR, enum=["EXPRESS", "BUSINESS"], description="Направление (пусто = всё)"),
+    OpenApiParameter("branch", OpenApiTypes.INT, description="Филиал Express (id); пусто = все филиалы"),
 ]
 
 
@@ -116,6 +134,35 @@ class AccountViewSet(viewsets.ModelViewSet):
             )
 
 
+class BranchViewSet(viewsets.ModelViewSet):
+    """Филиалы Loko Express. Чтение — менеджер/админ (для фильтра отчётов и формы
+    продажи); запись — только админ. Оператор получает пикер через /sales/branches/."""
+
+    serializer_class = BranchSerializer
+
+    def get_queryset(self):
+        qs = Branch.objects.all()
+        if self.request.query_params.get("active") in ("1", "true", "True"):
+            qs = qs.filter(is_active=True)
+        return qs
+
+    def get_permissions(self):
+        if self.action in ("list", "retrieve"):
+            return [DenyOperatorOrDirector()]
+        return [IsAdmin()]
+
+    def destroy(self, request, *args, **kwargs):
+        # Филиал с операциями защищён FK (PROTECT) — 409, не 500 (как у счёта).
+        try:
+            return super().destroy(request, *args, **kwargs)
+        except ProtectedError:
+            return Response(
+                {"detail": "Нельзя удалить филиал с привязанными операциями. "
+                           "Отметьте его неактивным."},
+                status=409,
+            )
+
+
 class ExpenseViewSet(viewsets.ModelViewSet):
     serializer_class = ExpenseSerializer
     permission_classes = [DenyOperatorOrDirector]
@@ -126,6 +173,7 @@ class ExpenseViewSet(viewsets.ModelViewSet):
         category = self.request.query_params.get("category")
         account = self.request.query_params.get("account")
         module = self.request.query_params.get("module")
+        branch = self.request.query_params.get("branch")
         if date_from:
             qs = qs.filter(date__gte=date_from)
         if date_to:
@@ -136,6 +184,8 @@ class ExpenseViewSet(viewsets.ModelViewSet):
             qs = qs.filter(account_id=account)
         if module:
             qs = qs.filter(account__module=module)
+        if branch:
+            qs = qs.filter(branch=branch)
         return qs
 
     def perform_create(self, serializer):
@@ -151,6 +201,7 @@ class OtherIncomeViewSet(viewsets.ModelViewSet):
         date_from, date_to, _ = _period_params(self.request)
         module = self.request.query_params.get("module")
         account = self.request.query_params.get("account")
+        branch = self.request.query_params.get("branch")
         if date_from:
             qs = qs.filter(date__gte=date_from)
         if date_to:
@@ -159,6 +210,8 @@ class OtherIncomeViewSet(viewsets.ModelViewSet):
             qs = qs.filter(account__module=module)
         if account:
             qs = qs.filter(account_id=account)
+        if branch:
+            qs = qs.filter(branch=branch)
         return qs
 
     def perform_create(self, serializer):
@@ -173,12 +226,15 @@ class TransferViewSet(viewsets.ModelViewSet):
         qs = Transfer.objects.select_related("from_account", "to_account").all()
         date_from, date_to, _ = _period_params(self.request)
         module = self.request.query_params.get("module")
+        branch = self.request.query_params.get("branch")
         if date_from:
             qs = qs.filter(date__gte=date_from)
         if date_to:
             qs = qs.filter(date__lte=date_to)
         if module:
             qs = qs.filter(from_account__module=module)
+        if branch:
+            qs = qs.filter(branch=branch)
         return qs
 
     def perform_create(self, serializer):
@@ -196,6 +252,7 @@ class TransferViewSet(viewsets.ModelViewSet):
 def pnl_report(request):
     date_from, date_to, payment = _period_params(request)
     module = _scoped_module(request)
+    branch = _scoped_branch(request)
     # Санитизируем ручную ставку налога: только неотрицательное число, иначе игнор.
     tax_rate = request.query_params.get("tax_rate")
     if tax_rate in ("", None):
@@ -206,7 +263,7 @@ def pnl_report(request):
                 tax_rate = None
         except (InvalidOperation, ValueError, TypeError):
             tax_rate = None
-    return Response(build_pnl(date_from, date_to, payment, tax_rate=tax_rate, module=module))
+    return Response(build_pnl(date_from, date_to, payment, tax_rate=tax_rate, module=module, branch=branch))
 
 
 @extend_schema(
@@ -220,6 +277,7 @@ def pnl_report(request):
 def cashflow_report(request):
     date_from, date_to, payment = _period_params(request)
     module = _scoped_module(request)
+    branch = _scoped_branch(request)
     opening_override = None
     raw = request.query_params.get("opening")
     if raw not in (None, ""):
@@ -227,7 +285,7 @@ def cashflow_report(request):
             opening_override = Decimal(str(raw))
         except (InvalidOperation, ValueError, TypeError):
             opening_override = None
-    return Response(build_cashflow(date_from, date_to, payment, module=module, opening_override=opening_override))
+    return Response(build_cashflow(date_from, date_to, payment, module=module, opening_override=opening_override, branch=branch))
 
 
 @extend_schema(
@@ -244,10 +302,11 @@ def cashflow_report(request):
 def monthly_report(request):
     date_from, date_to, _ = _period_params(request)
     module = _scoped_module(request)
+    branch = _scoped_branch(request)
     report = request.query_params.get("report", "pnl")
     if report not in ("pnl", "cashflow"):
         report = "pnl"
-    return Response(build_monthly(date_from, date_to, module=module, report=report))
+    return Response(build_monthly(date_from, date_to, module=module, report=report, branch=branch))
 
 
 @extend_schema(
@@ -293,6 +352,7 @@ def business_orders_report(request):
 def journal_report(request):
     date_from, date_to, _ = _period_params(request)
     module = request.query_params.get("module") or None
+    branch = _scoped_branch(request)
     effect = request.query_params.get("effect") or None
 
     def _int(name, default):
@@ -303,7 +363,7 @@ def journal_report(request):
 
     return Response(journal(
         date_from, date_to, module=module, effect_filter=effect,
-        limit=_int("limit", 500), offset=_int("offset", 0),
+        limit=_int("limit", 500), offset=_int("offset", 0), branch=branch,
     ))
 
 
@@ -327,5 +387,6 @@ def breakdown_report(request):
     date_from, date_to, payment = _period_params(request)
     line = request.query_params.get("line", "revenue")
     module = _scoped_module(request)
+    branch = _scoped_branch(request)
     basis = request.query_params.get("basis", "accrual")
-    return Response(breakdown(line, date_from, date_to, payment, module, basis))
+    return Response(breakdown(line, date_from, date_to, payment, module, basis, branch=branch))

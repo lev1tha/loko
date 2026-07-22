@@ -18,7 +18,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
 
-from finance.models import Account, AppSettings
+from finance.models import Account, AppSettings, Branch
 
 User = get_user_model()
 
@@ -55,6 +55,19 @@ class Command(BaseCommand):
             is_staff=True, is_superuser=True,
         )
         self._make_user("kassir", User.Role.MANAGER, "SEED_KASSIR_PASSWORD", "kassir123")
+
+        # Loko Express branches (филиалы) — физические точки приёма карго.
+        # Идемпотентно: имя — уникальный ключ. Историю (branch=NULL) не трогаем.
+        express_branches = [
+            ("Loko Express — Гульчинская улица, 13/1", "Гульчинская улица, 13/1"),
+            ("Loko Express — Исхака Раззакова, 40", "Исхака Раззакова, 40"),
+        ]
+        for name, address in express_branches:
+            _, created = Branch.objects.get_or_create(
+                name=name, defaults={"address": address},
+            )
+            if created:
+                self.stdout.write(self.style.SUCCESS(f"✔ Филиал: {name}"))
 
         # Loko Express accounts (all KGS)
         express_accounts = [

@@ -39,6 +39,16 @@ class User(AbstractUser):
         null=True,
         verbose_name="Направление (для директора)",
     )
+    # Филиал сотрудника (Loko Express). Продажи оператора авто-тегируются им;
+    # без него оператор не может создать продажу (guard-400 во views).
+    branch = models.ForeignKey(
+        "finance.Branch",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="users",
+        verbose_name="Филиал (для сотрудника)",
+    )
 
     class Meta:
         verbose_name = "Пользователь"

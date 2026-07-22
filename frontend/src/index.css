@@ -515,6 +515,7 @@ textarea.input { height: auto; padding: 10px 14px; resize: vertical; min-height:
 }
 .alert-error { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
 .alert-success { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+.alert-warning { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
 
 /* Поле «только для чтения» (расчётный вес из суммы) — видно, но не редактируется. */
 .input-readonly {

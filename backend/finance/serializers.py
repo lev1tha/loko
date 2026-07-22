@@ -4,7 +4,7 @@ from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from .models import (
-    Account, AppSettings, Currency, Expense, ExpenseArticle, ExpenseCategory,
+    Account, AppSettings, Branch, Currency, Expense, ExpenseArticle, ExpenseCategory,
     FINANCING_ARTICLES, INVESTING_ARTICLES, OPERATING_ARTICLES, OtherIncome, Transfer,
 )
 
@@ -25,6 +25,21 @@ class AppSettingsSerializer(serializers.ModelSerializer):
             "updated_at",
         )
         read_only_fields = ("updated_at",)
+
+
+class BranchSerializer(serializers.ModelSerializer):
+    """Филиал Loko Express (админ управляет; менеджер читает для фильтра/формы)."""
+
+    class Meta:
+        model = Branch
+        fields = ("id", "name", "address", "is_active", "created_at")
+        read_only_fields = ("created_at",)
+
+    def validate_name(self, value):
+        value = (value or "").strip()
+        if not value:
+            raise serializers.ValidationError("Укажите название филиала.")
+        return value
 
 
 class AccountSerializer(serializers.ModelSerializer):
@@ -61,6 +76,7 @@ class ExpenseSerializer(serializers.ModelSerializer):
     )
     account_name = serializers.CharField(source="account.name", read_only=True)
     account_currency = serializers.CharField(source="account.currency", read_only=True)
+    branch_name = serializers.CharField(source="branch.name", read_only=True, default=None)
     payable = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
     # Суммы, приведённые к сому по СНАПШОТ-курсу операции (юань × зафикс. курс).
     amount_kgs = serializers.SerializerMethodField()
@@ -86,6 +102,8 @@ class ExpenseSerializer(serializers.ModelSerializer):
             "account",
             "account_name",
             "account_currency",
+            "branch",
+            "branch_name",
             "category",
             "category_display",
             "opex_article",
@@ -162,6 +180,7 @@ class TransferSerializer(serializers.ModelSerializer):
     to_account_name = serializers.CharField(source="to_account.name", read_only=True)
     from_currency = serializers.CharField(source="from_account.currency", read_only=True)
     to_currency = serializers.CharField(source="to_account.currency", read_only=True)
+    branch_name = serializers.CharField(source="branch.name", read_only=True, default=None)
     is_conversion = serializers.BooleanField(read_only=True)
 
     class Meta:
@@ -174,6 +193,8 @@ class TransferSerializer(serializers.ModelSerializer):
             "to_account",
             "to_account_name",
             "to_currency",
+            "branch",
+            "branch_name",
             "amount",
             "to_amount",
             "rate",
@@ -239,6 +260,7 @@ class TransferSerializer(serializers.ModelSerializer):
 class OtherIncomeSerializer(serializers.ModelSerializer):
     account_name = serializers.CharField(source="account.name", read_only=True)
     account_currency = serializers.CharField(source="account.currency", read_only=True)
+    branch_name = serializers.CharField(source="branch.name", read_only=True, default=None)
     amount_kgs = serializers.SerializerMethodField()
 
     @extend_schema_field(_KGS_FIELD)
@@ -249,6 +271,7 @@ class OtherIncomeSerializer(serializers.ModelSerializer):
         model = OtherIncome
         fields = (
             "id", "account", "account_name", "account_currency",
+            "branch", "branch_name",
             "amount", "amount_kgs", "description", "date", "created_at",
         )
         read_only_fields = ("created_at",)

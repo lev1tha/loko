@@ -8,6 +8,7 @@ User = get_user_model()
 class UserSerializer(serializers.ModelSerializer):
     role_display = serializers.CharField(source="get_role_display", read_only=True)
     module_display = serializers.CharField(source="get_module_display", read_only=True)
+    branch_name = serializers.CharField(source="branch.name", read_only=True, default=None)
     is_admin = serializers.BooleanField(read_only=True)
     is_director = serializers.BooleanField(read_only=True)
 
@@ -23,6 +24,8 @@ class UserSerializer(serializers.ModelSerializer):
             "role_display",
             "module",
             "module_display",
+            "branch",
+            "branch_name",
             "is_admin",
             "is_director",
             "is_active",
@@ -43,6 +46,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
             "email",
             "role",
             "module",
+            "branch",
             "password",
         )
 
@@ -58,6 +62,10 @@ class UserCreateSerializer(serializers.ModelSerializer):
                 )
         else:
             attrs["module"] = None
+        # Филиал имеет смысл только для «Сотрудника» (авто-тег его продаж Express).
+        # У остальных ролей — очищаем, чтобы не оставлять «висящей» привязки.
+        if role != User.Role.OPERATOR:
+            attrs["branch"] = None
         return attrs
 
     def create(self, validated_data):

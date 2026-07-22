@@ -5,6 +5,7 @@ from .models import ClientPrice, Sale
 
 class SaleSerializer(serializers.ModelSerializer):
     account_name = serializers.CharField(source="account.name", read_only=True)
+    branch_name = serializers.CharField(source="branch.name", read_only=True, default=None)
     is_cash = serializers.BooleanField(read_only=True)
     receivable_som = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
     # Расчётный («предположительный») вес — для показа админу, в т.ч. в «прямой сумме».
@@ -25,6 +26,8 @@ class SaleSerializer(serializers.ModelSerializer):
             "places",
             "account",
             "account_name",
+            "branch",
+            "branch_name",
             "is_cash",
             # snapshot params (read-only)
             "price_per_kg_usd",
@@ -56,6 +59,7 @@ class SaleSerializer(serializers.ModelSerializer):
             "weight_kg": {"required": False},
             "cost_som": {"required": False},
             "cost_is_manual": {"required": False},
+            "branch": {"required": False},
         }
 
     def validate_weight_kg(self, value):
@@ -82,6 +86,15 @@ class SaleSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {"account": "Счёт продажи Express должен быть в сомах (KGS)."}
                 )
+
+        # Филиал обязателен для НОВОЙ продажи Express — но только там, где поле
+        # доступно (менеджер/админ). У оператора он проставляется на сервере
+        # (perform_create; его сериализатор поля branch не содержит). При ПРАВКЕ
+        # существующей продажи филиал не навязываем: историю (branch=NULL) можно
+        # редактировать (напр. быстрая правка суммы), не проставляя филиал.
+        if "branch" in self.fields and self.instance is None:
+            if attrs.get("branch") is None:
+                raise serializers.ValidationError({"branch": "Укажите филиал."})
 
         # Оплата в пределах начисления: 0 ≤ оплачено ≤ начислено (нет «переплаты»/минуса).
         paid = attrs.get("paid_som", None)
@@ -124,6 +137,7 @@ class OperatorSaleSerializer(SaleSerializer):
             "places",
             "account",
             "account_name",
+            "branch_name",
             "is_cash",
             "price_som",
             "paid_som",

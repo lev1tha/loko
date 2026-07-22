@@ -66,6 +66,7 @@ const ADMIN_GROUP = {
   items: [
     { to: '/settings', label: 'Настройки', icon: IconSettings },
     { to: '/users', label: 'Пользователи', icon: IconUsers },
+    { to: '/branches', label: 'Филиалы', icon: IconBox },
   ],
 }
 
@@ -101,6 +102,7 @@ const TITLES = {
   '/reports': ['Аналитика', 'ООПИУ и ОДДС за период'],
   '/settings': ['Настройки', 'Ценообразование, курсы и налог'],
   '/users': ['Пользователи', 'Управление доступом и ролями'],
+  '/branches': ['Филиалы', 'Точки приёма Loko Express — управление филиалами'],
   '/guide': ['Инструкция', 'Как пользоваться системой — для администраторов'],
 }
 

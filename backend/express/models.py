@@ -58,6 +58,15 @@ class Sale(models.Model):
         verbose_name="Счёт зачисления",
         help_text="Касса/банк, куда поступила оплата (нал/безнал)",
     )
+    branch = models.ForeignKey(
+        "finance.Branch",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="sales",
+        verbose_name="Филиал",
+        help_text="Точка приёма Express (обязательно для новых продаж)",
+    )
 
     # --- snapshotted pricing parameters ------------------------------------
     price_per_kg_usd = models.DecimalField(max_digits=10, decimal_places=2)

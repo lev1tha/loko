@@ -14,6 +14,7 @@ from express.views import ClientPriceViewSet, SaleViewSet
 from finance.views import (
     AccountViewSet,
     AppSettingsView,
+    BranchViewSet,
     ExpenseViewSet,
     OtherIncomeViewSet,
     TransferViewSet,
@@ -30,6 +31,7 @@ from finance.views import (
 router = DefaultRouter()
 router.register("users", UserViewSet, basename="user")
 router.register("accounts", AccountViewSet, basename="account")
+router.register("branches", BranchViewSet, basename="branch")
 router.register("expenses", ExpenseViewSet, basename="expense")
 router.register("other-income", OtherIncomeViewSet, basename="other-income")
 router.register("transfers", TransferViewSet, basename="transfer")

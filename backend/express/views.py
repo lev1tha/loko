@@ -29,6 +29,7 @@ ZERO = Decimal("0.00")
             OpenApiParameter("to", OpenApiTypes.DATE, description="Конец периода"),
             OpenApiParameter("payment", OpenApiTypes.STR, enum=["all", "cash", "noncash"], description="Вид оплаты"),
             OpenApiParameter("search", OpenApiTypes.STR, description="Поиск по коду клиента"),
+            OpenApiParameter("branch", OpenApiTypes.INT, description="Филиал Express (id)"),
         ]
     )
 )
@@ -52,6 +53,7 @@ class SaleViewSet(viewsets.ModelViewSet):
         date_to = params.get("to")
         payment = params.get("payment")
         search = params.get("search")
+        branch = params.get("branch")
         if date_from:
             qs = qs.filter(date__gte=date_from)
         if date_to:
@@ -62,10 +64,22 @@ class SaleViewSet(viewsets.ModelViewSet):
             qs = qs.filter(account__kind="BANK")
         if search:
             qs = qs.filter(client_code__icontains=search)
+        if branch:
+            qs = qs.filter(branch=branch)
         return qs
 
     def perform_create(self, serializer):
-        serializer.save(created_by=self.request.user)
+        user = self.request.user
+        # Оператор («Сотрудник») жёстко штампует свой филиал — подмена невозможна.
+        # Если он не привязан к филиалу — 400 (а не тихое сохранение с branch=NULL).
+        if getattr(user, "is_operator", False):
+            if user.branch_id is None:
+                raise serializers.ValidationError(
+                    {"branch": "Оператор не привязан к филиалу. Обратитесь к администратору."}
+                )
+            serializer.save(created_by=user, branch=user.branch)
+        else:
+            serializer.save(created_by=user)
 
     @extend_schema(responses=OpenApiTypes.OBJECT)
     @action(detail=False, methods=["get"])
@@ -206,6 +220,18 @@ class SaleViewSet(viewsets.ModelViewSet):
             module="EXPRESS", currency="KGS", is_active=True
         ).order_by("name")
         return Response([{"id": a.id, "name": a.name, "kind": a.kind} for a in qs])
+
+    @extend_schema(responses=OpenApiTypes.OBJECT)
+    @action(detail=False, methods=["get"], url_path="branches")
+    def branches(self, request):
+        """Минимальный пикер филиалов Express для формы продажи (id/name активных).
+
+        Доступен и роли «Сотрудник»: его выбор всё равно жёстко фиксируется его
+        филиалом на сервере (perform_create). Балансов/финансов не раскрывает.
+        """
+        from finance.models import Branch
+        qs = Branch.objects.filter(is_active=True).order_by("name")
+        return Response([{"id": b.id, "name": b.name} for b in qs])
 
     @extend_schema(
         parameters=[

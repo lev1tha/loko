@@ -277,6 +277,29 @@ class Account(models.Model):
         return total
 
 
+class Branch(models.Model):
+    """Филиал Loko Express (физическая точка приёма карго).
+
+    Тег на операциях Express (продажи/расходы/перемещения) для раздельной и
+    сводной аналитики по офисам. Филиал НЕ владеет счётом — банковские карты
+    общие для всех точек, поэтому в отчётах остатки счетов консолидируются по
+    компании, а по филиалу разбивается только ОПиУ (по тегам операций).
+    """
+
+    name = models.CharField(max_length=160, unique=True, verbose_name="Название")
+    address = models.CharField(max_length=255, blank=True, verbose_name="Адрес")
+    is_active = models.BooleanField(default=True, verbose_name="Активен")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Филиал"
+        verbose_name_plural = "Филиалы"
+        ordering = ("name",)
+
+    def __str__(self) -> str:
+        return self.name
+
+
 class ExpenseArticle(models.TextChoices):
     """Статья расхода — детализация внутри категории (раздела ОДДС).
 
@@ -357,6 +380,12 @@ class Expense(models.Model):
         on_delete=models.PROTECT,
         related_name="expenses",
         verbose_name="Счёт списания",
+    )
+    # Филиал Express (тег для раздельной аналитики). NULL = историческая/
+    # нераспределённая операция; для Business всегда пусто.
+    branch = models.ForeignKey(
+        "finance.Branch", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="expenses", verbose_name="Филиал (Express)",
     )
     category = models.CharField(
         max_length=12,
@@ -459,6 +488,11 @@ class Transfer(models.Model):
         related_name="incoming_transfers",
         verbose_name="На счёт",
     )
+    # Филиал Express (инкассация нал→карта в пределах точки). NULL для Business.
+    branch = models.ForeignKey(
+        "finance.Branch", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="transfers", verbose_name="Филиал (Express)",
+    )
     amount = models.DecimalField(
         max_digits=14, decimal_places=2, verbose_name="Сумма списания"
     )
@@ -532,6 +566,10 @@ class OtherIncome(models.Model):
     account = models.ForeignKey(
         Account, on_delete=models.PROTECT, related_name="other_incomes",
         verbose_name="Счёт зачисления",
+    )
+    branch = models.ForeignKey(
+        "finance.Branch", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="other_incomes", verbose_name="Филиал (Express)",
     )
     amount = models.DecimalField(max_digits=14, decimal_places=2, verbose_name="Сумма")
     kgs_rate = models.DecimalField(

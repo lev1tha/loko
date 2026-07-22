@@ -78,7 +78,7 @@ class SalesAccess(BasePermission):
     # ViewSet actions an operator is allowed to perform.
     # ``mine`` — свои продажи за последние сутки (+ выгрузка в Excel); финансовых
     # полей других продаж и сводных цифр он по-прежнему не видит.
-    OPERATOR_ACTIONS = frozenset({"create", "quote", "express_accounts", "mine"})
+    OPERATOR_ACTIONS = frozenset({"create", "quote", "express_accounts", "mine", "branches"})
 
     def has_permission(self, request, view):
         user = request.user

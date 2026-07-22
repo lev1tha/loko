@@ -43,12 +43,14 @@ export default function Sales() {
   const [error, setError] = useState('')
   const [editCell, setEditCell] = useState(null) // inline-правка суммы в таблице: {id, value}
   const [savingCell, setSavingCell] = useState(false)
+  const [branch, setBranch] = useState('') // фильтр по филиалу ('' = все)
 
-  const params = { from, to, payment, search: search || undefined, page_size: 10000 }
+  const params = { from, to, payment, search: search || undefined, page_size: 10000, ...(branch ? { branch } : {}) }
   const sales = useFetch('/sales/', params)
   const summary = useFetch('/sales/summary/', params)
   const weightSummary = useFetch('/sales/weight-summary/', { from: wFrom, to: wTo })
   const accounts = useFetch('/accounts/', { module: 'EXPRESS' })
+  const branches = asList(useFetch('/branches/', { active: 1 }).data)
 
   const rows = asList(sales.data)
   const total = sales.data?.count ?? rows.length
@@ -157,6 +159,12 @@ export default function Sales() {
               <span className="field-label">Оплата</span>
               <Segmented value={payment} onChange={setPayment} options={PAYMENTS} />
             </div>
+            <Field label="Филиал">
+              <select className="select" value={branch} onChange={(e) => setBranch(e.target.value)}>
+                <option value="">Все филиалы</option>
+                {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
+            </Field>
           </div>
           <button className="btn btn-primary" onClick={() => setForm('new')}>
             <IconPlus size={18} /> Новая продажа
@@ -251,6 +259,7 @@ export default function Sales() {
         <SaleForm
           editing={form === 'new' ? null : form}
           accounts={asList(accounts.data)}
+          branches={branches}
           onClose={() => setForm(null)}
           onSaved={() => {
             setForm(null)
@@ -262,7 +271,7 @@ export default function Sales() {
   )
 }
 
-function SaleForm({ editing, accounts, onClose, onSaved }) {
+function SaleForm({ editing, accounts, branches = [], onClose, onSaved }) {
   const isEdit = !!editing
   const [mode, setMode] = useState(editing?.amount_mode || 'WEIGHT')
   const [clientCode, setClientCode] = useState(editing?.client_code || '')
@@ -270,6 +279,7 @@ function SaleForm({ editing, accounts, onClose, onSaved }) {
   const [directAmount, setDirectAmount] = useState(isEdit && editing.amount_mode === 'DIRECT' ? editing.price_som : '')
   const [places, setPlaces] = useState(String(editing?.places || '1'))
   const [accountId, setAccountId] = useState(editing?.account || accounts[0]?.id || '')
+  const [branchId, setBranchId] = useState(editing?.branch || '')
   const [date, setDate] = useState(editing?.date || today())
   const [quote, setQuote] = useState(null)
   const [perKgRate, setPerKgRate] = useState(0) // цена 1 кг (сом) из настроек — для пересчёта суммы → вес
@@ -470,6 +480,12 @@ function SaleForm({ editing, accounts, onClose, onSaved }) {
         )}
 
         <div className="row row-wrap">
+          <Field label="Филиал" hint={isEdit ? 'можно оставить как есть' : 'обязательно для новой продажи'}>
+            <select className="select" value={branchId} onChange={(e) => setBranchId(e.target.value)} required={!isEdit}>
+              <option value="">— выберите филиал —</option>
+              {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+          </Field>
           <Field label="Счёт зачисления (нал/безнал)">
             <select className="select" value={accountId} onChange={(e) => setAccountId(e.target.value)} required>
               {accounts.map((a) => (
