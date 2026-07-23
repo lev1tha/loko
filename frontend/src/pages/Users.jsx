@@ -3,12 +3,12 @@ import api, { errorMessage } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { useFetch, asList } from '../lib/hooks'
 import { Alert, Badge, EmptyState, Field, Modal, Spinner } from '../components/ui'
-import { IconPlus, IconTrash } from '../components/icons'
+import { IconPlus, IconEdit, IconTrash } from '../components/icons'
 
 export default function Users() {
   const { user } = useAuth()
   const users = useFetch('/users/')
-  const [showForm, setShowForm] = useState(false)
+  const [form, setForm] = useState(null) // null=закрыто, 'new', или объект пользователя (правка)
   const [busyId, setBusyId] = useState(null)
   const [error, setError] = useState('')
   const rows = asList(users.data)
@@ -49,7 +49,7 @@ export default function Users() {
       <div className="card">
         <div className="card-header">
           <span className="card-title">Пользователи системы</span>
-          <button className="btn btn-primary btn-sm" onClick={() => setShowForm(true)}>
+          <button className="btn btn-primary btn-sm" onClick={() => setForm('new')}>
             <IconPlus size={16} /> Новый пользователь
           </button>
         </div>
@@ -104,18 +104,28 @@ export default function Users() {
                       </Badge>
                     </td>
                     <td className="num">
-                      {u.id === user?.id ? (
-                        <span className="caption muted">вы</span>
-                      ) : (
+                      <div className="row gap-sm" style={{ justifyContent: 'flex-end' }}>
                         <button
-                          className="btn btn-icon btn-danger btn-sm"
-                          title="Удалить пользователя"
+                          className="btn btn-icon btn-ghost btn-sm"
+                          title="Изменить пользователя"
                           disabled={busyId === u.id}
-                          onClick={() => remove(u)}
+                          onClick={() => setForm(u)}
                         >
-                          <IconTrash size={16} />
+                          <IconEdit size={16} />
                         </button>
-                      )}
+                        {u.id === user?.id ? (
+                          <span className="caption muted" style={{ alignSelf: 'center' }}>вы</span>
+                        ) : (
+                          <button
+                            className="btn btn-icon btn-danger btn-sm"
+                            title="Удалить пользователя"
+                            disabled={busyId === u.id}
+                            onClick={() => remove(u)}
+                          >
+                            <IconTrash size={16} />
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -125,11 +135,12 @@ export default function Users() {
         )}
       </div>
 
-      {showForm && (
+      {form && (
         <UserForm
-          onClose={() => setShowForm(false)}
+          editing={form === 'new' ? null : form}
+          onClose={() => setForm(null)}
           onSaved={() => {
-            setShowForm(false)
+            setForm(null)
             users.reload()
           }}
         />
@@ -138,12 +149,13 @@ export default function Users() {
   )
 }
 
-function UserForm({ onClose, onSaved }) {
-  const [username, setUsername] = useState('')
-  const [firstName, setFirstName] = useState('')
-  const [role, setRole] = useState('MANAGER')
-  const [module, setModule] = useState('EXPRESS')
-  const [branchId, setBranchId] = useState('')
+function UserForm({ editing, onClose, onSaved }) {
+  const isEdit = !!editing
+  const [username, setUsername] = useState(editing?.username || '')
+  const [firstName, setFirstName] = useState(editing?.first_name || '')
+  const [role, setRole] = useState(editing?.role || 'MANAGER')
+  const [module, setModule] = useState(editing?.module || 'EXPRESS')
+  const [branchId, setBranchId] = useState(editing?.branch || '')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
@@ -158,16 +170,22 @@ function UserForm({ onClose, onSaved }) {
     setError('')
     setSaving(true)
     try {
-      await api.post('/users/', {
-        username: username.trim(),
+      const body = {
         first_name: firstName.trim(),
         role,
         // Направление шлём только для директора (остальным сервер обнулит).
         module: isDirector ? module : null,
         // Филиал — только для сотрудника; пусто = филиал по умолчанию (Гульчинская).
         branch: isOperator ? (branchId || null) : null,
-        password,
-      })
+      }
+      // Пароль: при создании обязателен; при правке — шлём, только если введён новый.
+      if (password) body.password = password
+      if (isEdit) {
+        await api.patch(`/users/${editing.id}/`, body)
+      } else {
+        body.username = username.trim()
+        await api.post('/users/', body)
+      }
       onSaved()
     } catch (err) {
       setError(errorMessage(err))
@@ -178,21 +196,28 @@ function UserForm({ onClose, onSaved }) {
 
   return (
     <Modal
-      title="Новый пользователь"
+      title={isEdit ? `Изменить · ${editing.username}` : 'Новый пользователь'}
       onClose={onClose}
       footer={
         <>
           <button className="btn btn-secondary" onClick={onClose}>Отмена</button>
           <button className="btn btn-primary" onClick={submit} disabled={saving}>
-            {saving ? 'Сохранение…' : 'Создать'}
+            {saving ? 'Сохранение…' : isEdit ? 'Сохранить' : 'Создать'}
           </button>
         </>
       }
     >
       <form onSubmit={submit} className="col">
         {error && <Alert kind="error">{error}</Alert>}
-        <Field label="Логин">
-          <input className="input" value={username} onChange={(e) => setUsername(e.target.value)} required autoFocus />
+        <Field label="Логин" hint={isEdit ? 'логин изменить нельзя' : undefined}>
+          <input
+            className={`input ${isEdit ? 'input-readonly' : ''}`}
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            required={!isEdit}
+            readOnly={isEdit}
+            autoFocus={!isEdit}
+          />
         </Field>
         <Field label="Имя">
           <input className="input" value={firstName} onChange={(e) => setFirstName(e.target.value)} />
@@ -221,8 +246,16 @@ function UserForm({ onClose, onSaved }) {
             </select>
           </Field>
         )}
-        <Field label="Пароль" hint="Минимум 6 символов">
-          <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} />
+        <Field label="Пароль" hint={isEdit ? 'оставьте пустым, чтобы не менять' : 'Минимум 6 символов'}>
+          <input
+            className="input"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required={!isEdit}
+            minLength={6}
+            placeholder={isEdit ? '••••••' : undefined}
+          />
         </Field>
       </form>
     </Modal>
