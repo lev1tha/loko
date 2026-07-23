@@ -15,7 +15,7 @@ from drf_spectacular.utils import (
 )
 
 from accounts.permissions import DenyOperatorOrDirector, SalesAccess
-from finance.models import Account, AppSettings
+from finance.models import Account, AppSettings, Branch
 from .models import ClientPrice, Sale
 from .serializers import ClientPriceSerializer, OperatorSaleSerializer, SaleSerializer
 
@@ -70,16 +70,14 @@ class SaleViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         user = self.request.user
-        # Оператор («Сотрудник») жёстко штампует свой филиал — подмена невозможна.
-        # Если он не привязан к филиалу — 400 (а не тихое сохранение с branch=NULL).
+        # Филиал: у оператора («Сотрудник») — его закреплённый филиал (подмена
+        # невозможна); у менеджера/админа — выбранный в форме. Если филиал не задан —
+        # подставляем филиал по умолчанию (Гульчинская), а не блокируем продажу.
         if getattr(user, "is_operator", False):
-            if user.branch_id is None:
-                raise serializers.ValidationError(
-                    {"branch": "Оператор не привязан к филиалу. Обратитесь к администратору."}
-                )
-            serializer.save(created_by=user, branch=user.branch)
+            branch = user.branch or Branch.resolve_default()
         else:
-            serializer.save(created_by=user)
+            branch = serializer.validated_data.get("branch") or Branch.resolve_default()
+        serializer.save(created_by=user, branch=branch)
 
     @extend_schema(responses=OpenApiTypes.OBJECT)
     @action(detail=False, methods=["get"])

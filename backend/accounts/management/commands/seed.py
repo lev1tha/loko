@@ -68,6 +68,11 @@ class Command(BaseCommand):
             )
             if created:
                 self.stdout.write(self.style.SUCCESS(f"✔ Филиал: {name}"))
+        # Гульчинская — филиал по умолчанию (подставляется в продажи без явного филиала).
+        default_name = "Loko Express — Гульчинская улица, 13/1"
+        if Branch.objects.filter(name=default_name).exists():
+            Branch.objects.filter(name=default_name).update(is_default=True)
+            Branch.objects.exclude(name=default_name).update(is_default=False)
 
         # Loko Express accounts (all KGS)
         express_accounts = [

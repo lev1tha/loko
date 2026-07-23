@@ -68,6 +68,7 @@ export default function Branches() {
                       <Badge variant={b.is_active ? 'badge-success' : 'badge-manager'}>
                         {b.is_active ? 'Активен' : 'Неактивен'}
                       </Badge>
+                      {b.is_default && <Badge variant="badge-bank">по умолчанию</Badge>}
                     </td>
                     <td className="num">
                       <div className="row gap-sm" style={{ justifyContent: 'flex-end' }}>
@@ -111,6 +112,7 @@ function BranchForm({ editing, onClose, onSaved }) {
   const [name, setName] = useState(editing?.name || '')
   const [address, setAddress] = useState(editing?.address || '')
   const [isActive, setIsActive] = useState(editing ? editing.is_active : true)
+  const [isDefault, setIsDefault] = useState(editing ? editing.is_default : false)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -119,7 +121,7 @@ function BranchForm({ editing, onClose, onSaved }) {
     setError('')
     setSaving(true)
     try {
-      const body = { name: name.trim(), address: address.trim(), is_active: isActive }
+      const body = { name: name.trim(), address: address.trim(), is_active: isActive, is_default: isDefault }
       if (isEdit) await api.patch(`/branches/${editing.id}/`, body)
       else await api.post('/branches/', body)
       onSaved()
@@ -166,6 +168,10 @@ function BranchForm({ editing, onClose, onSaved }) {
         <label className="check-row">
           <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
           <span>Активен (предлагается в формах продаж и фильтрах)</span>
+        </label>
+        <label className="check-row">
+          <input type="checkbox" checked={isDefault} onChange={(e) => setIsDefault(e.target.checked)} />
+          <span>Филиал по умолчанию (подставляется в продажи без явно выбранного филиала)</span>
         </label>
       </form>
     </Modal>

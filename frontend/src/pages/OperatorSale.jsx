@@ -20,7 +20,7 @@ const MODES = [
 //   • «Прямая сумма» — вводим сумму, ВЕС показывается расчётно и НЕ редактируется.
 // Видна ИСКЛЮЧИТЕЛЬНО общая стоимость — без маржи, себестоимости и дебиторки.
 export default function OperatorSale() {
-  const { userBranch, userBranchName } = useAuth()
+  const { userBranchName } = useAuth()
   const accountsReq = useFetch('/sales/accounts/')
   // «МБанк» исключён из выбора счёта на странице сотрудника (по требованию).
   const accounts = asList(accountsReq.data).filter(
@@ -166,21 +166,6 @@ export default function OperatorSale() {
 
   if (accountsReq.loading) return <LoadingTruck />
 
-  // Сотрудник не привязан к филиалу — продажи создавать нельзя (сервер вернёт 400).
-  if (!userBranch) {
-    return (
-      <div className="operator-card card">
-        <div className="operator-card-head">
-          <h2 className="card-title">Новая продажа</h2>
-        </div>
-        <Alert kind="error">
-          Вы не привязаны к филиалу. Обратитесь к администратору, чтобы он указал ваш филиал —
-          без этого продажу зарегистрировать нельзя.
-        </Alert>
-      </div>
-    )
-  }
-
   // Нет ни одного счёта Express — добавлять продажу некуда.
   if (!accounts.length) {
     return (
@@ -289,8 +274,8 @@ export default function OperatorSale() {
           )}
         </div>
 
-        <Field label="Филиал" hint="Ваш филиал — продажа запишется в него">
-          <input className="input input-readonly" value={userBranchName || '—'} readOnly tabIndex={-1} />
+        <Field label="Филиал" hint="Продажа запишется в этот филиал">
+          <input className="input input-readonly" value={userBranchName || 'По умолчанию'} readOnly tabIndex={-1} />
         </Field>
 
         <Field label="Счёт зачисления (нал/безнал)">

@@ -289,6 +289,10 @@ class Branch(models.Model):
     name = models.CharField(max_length=160, unique=True, verbose_name="Название")
     address = models.CharField(max_length=255, blank=True, verbose_name="Адрес")
     is_active = models.BooleanField(default=True, verbose_name="Активен")
+    is_default = models.BooleanField(
+        default=False, verbose_name="Филиал по умолчанию",
+        help_text="Подставляется в операции без явно выбранного филиала.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -298,6 +302,21 @@ class Branch(models.Model):
 
     def __str__(self) -> str:
         return self.name
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        # Единственность «филиала по умолчанию»: назначили новый — снимаем флаг с прочих.
+        if self.is_default:
+            Branch.objects.exclude(pk=self.pk).filter(is_default=True).update(is_default=False)
+
+    @classmethod
+    def resolve_default(cls):
+        """Филиал по умолчанию для операций без явно выбранного филиала:
+        помеченный is_default (активный), иначе первый активный (по id)."""
+        return (
+            cls.objects.filter(is_default=True, is_active=True).order_by("id").first()
+            or cls.objects.filter(is_active=True).order_by("id").first()
+        )
 
 
 class ExpenseArticle(models.TextChoices):

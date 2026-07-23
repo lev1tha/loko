@@ -279,7 +279,7 @@ function SaleForm({ editing, accounts, branches = [], onClose, onSaved }) {
   const [directAmount, setDirectAmount] = useState(isEdit && editing.amount_mode === 'DIRECT' ? editing.price_som : '')
   const [places, setPlaces] = useState(String(editing?.places || '1'))
   const [accountId, setAccountId] = useState(editing?.account || accounts[0]?.id || '')
-  const [branchId, setBranchId] = useState(editing?.branch || '')
+  const [branchId, setBranchId] = useState(editing?.branch || branches.find((b) => b.is_default)?.id || '')
   const [date, setDate] = useState(editing?.date || today())
   const [quote, setQuote] = useState(null)
   const [perKgRate, setPerKgRate] = useState(0) // цена 1 кг (сом) из настроек — для пересчёта суммы → вес
@@ -480,9 +480,9 @@ function SaleForm({ editing, accounts, branches = [], onClose, onSaved }) {
         )}
 
         <div className="row row-wrap">
-          <Field label="Филиал" hint={isEdit ? 'можно оставить как есть' : 'обязательно для новой продажи'}>
-            <select className="select" value={branchId} onChange={(e) => setBranchId(e.target.value)} required={!isEdit}>
-              <option value="">— выберите филиал —</option>
+          <Field label="Филиал" hint="Пусто = филиал по умолчанию">
+            <select className="select" value={branchId} onChange={(e) => setBranchId(e.target.value)}>
+              <option value="">По умолчанию</option>
               {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
           </Field>

@@ -87,14 +87,8 @@ class SaleSerializer(serializers.ModelSerializer):
                     {"account": "Счёт продажи Express должен быть в сомах (KGS)."}
                 )
 
-        # Филиал обязателен для НОВОЙ продажи Express — но только там, где поле
-        # доступно (менеджер/админ). У оператора он проставляется на сервере
-        # (perform_create; его сериализатор поля branch не содержит). При ПРАВКЕ
-        # существующей продажи филиал не навязываем: историю (branch=NULL) можно
-        # редактировать (напр. быстрая правка суммы), не проставляя филиал.
-        if "branch" in self.fields and self.instance is None:
-            if attrs.get("branch") is None:
-                raise serializers.ValidationError({"branch": "Укажите филиал."})
+        # Филиал НЕ обязателен: если не выбран — сервер подставит филиал по умолчанию
+        # (Гульчинская) в perform_create. Историю (branch=NULL) правим без филиала.
 
         # Оплата в пределах начисления: 0 ≤ оплачено ≤ начислено (нет «переплаты»/минуса).
         paid = attrs.get("paid_som", None)

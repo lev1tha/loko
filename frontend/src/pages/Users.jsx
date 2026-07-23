@@ -51,6 +51,7 @@ export default function Users() {
                   <th>Имя</th>
                   <th>Роль</th>
                   <th>Направление</th>
+                  <th>Филиал</th>
                   <th>Статус</th>
                   <th></th>
                 </tr>
@@ -64,6 +65,7 @@ export default function Users() {
                       <Badge variant={u.is_admin ? 'badge-admin' : 'badge-manager'}>{u.role_display}</Badge>
                     </td>
                     <td className="muted">{u.role === 'DIRECTOR' ? (u.module_display || '—') : '—'}</td>
+                    <td className="muted">{u.role === 'OPERATOR' ? (u.branch_name || 'по умолчанию') : '—'}</td>
                     <td>
                       <Badge variant={u.is_active ? 'badge-success' : 'badge-danger'}>
                         {u.is_active ? 'Активен' : 'Отключён'}
@@ -109,11 +111,15 @@ function UserForm({ onClose, onSaved }) {
   const [firstName, setFirstName] = useState('')
   const [role, setRole] = useState('MANAGER')
   const [module, setModule] = useState('EXPRESS')
+  const [branchId, setBranchId] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
+  const branches = asList(useFetch('/branches/', { active: 1 }).data)
+  const defaultBranch = branches.find((b) => b.is_default)
   const isDirector = role === 'DIRECTOR'
+  const isOperator = role === 'OPERATOR'
 
   async function submit(e) {
     e.preventDefault()
@@ -126,6 +132,8 @@ function UserForm({ onClose, onSaved }) {
         role,
         // Направление шлём только для директора (остальным сервер обнулит).
         module: isDirector ? module : null,
+        // Филиал — только для сотрудника; пусто = филиал по умолчанию (Гульчинская).
+        branch: isOperator ? (branchId || null) : null,
         password,
       })
       onSaved()
@@ -170,6 +178,14 @@ function UserForm({ onClose, onSaved }) {
             <select className="select" value={module} onChange={(e) => setModule(e.target.value)}>
               <option value="EXPRESS">Loko Express</option>
               <option value="BUSINESS">Loko Business</option>
+            </select>
+          </Field>
+        )}
+        {isOperator && (
+          <Field label="Филиал сотрудника" hint="Куда попадут его продажи (можно изменить позже)">
+            <select className="select" value={branchId} onChange={(e) => setBranchId(e.target.value)}>
+              <option value="">По умолчанию{defaultBranch ? ` — ${defaultBranch.name}` : ''}</option>
+              {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
           </Field>
         )}
