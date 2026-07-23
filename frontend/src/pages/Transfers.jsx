@@ -2,19 +2,38 @@ import { useEffect, useMemo, useState } from 'react'
 import api, { errorMessage } from '../api/client'
 import { useFetch, asList } from '../lib/hooks'
 import { firstOfMonth, today, money, dateRu } from '../lib/format'
+import { useAuth } from '../auth/AuthContext'
 import { Alert, Badge, EmptyState, Field, Modal, Spinner } from '../components/ui'
-import { IconPlus, IconTransfer } from '../components/icons'
+import { IconPlus, IconEdit, IconTrash, IconTransfer } from '../components/icons'
 
 // module: 'BUSINESS' | undefined (all)
 export default function Transfers({ module }) {
+  const { isAdmin } = useAuth()
   const [from, setFrom] = useState(firstOfMonth())
   const [to, setTo] = useState(today())
-  const [showForm, setShowForm] = useState(false)
+  const [form, setForm] = useState(null) // null=закрыто, 'new', или объект перевода (правка)
+  const [busyId, setBusyId] = useState(null)
+  const [error, setError] = useState('')
 
   const params = { from, to, ...(module ? { module } : {}), page_size: 10000 }
   const transfers = useFetch('/transfers/', params)
   const withdrawals = useFetch('/expenses/', { from, to, category: 'OWNER', ...(module ? { module } : {}), page_size: 10000 })
   const accounts = useFetch('/accounts/', module ? { module, page_size: 10000 } : { page_size: 10000 })
+
+  // Правка/удаление операций — привилегия администратора (корректировка обмена/переводов).
+  async function removeTransfer(t) {
+    if (!window.confirm(`Удалить перевод от ${dateRu(t.date)} на ${money(t.amount, t.from_currency)}? Действие необратимо.`)) return
+    setBusyId(t.id)
+    setError('')
+    try {
+      await api.delete(`/transfers/${t.id}/`)
+      transfers.reload()
+    } catch (err) {
+      setError(errorMessage(err))
+    } finally {
+      setBusyId(null)
+    }
+  }
 
   // Переводы/конвертации + изъятия «на личный кошелёк» (вывод владельцем) в одном списке, по дате.
   const movements = [
@@ -25,6 +44,7 @@ export default function Transfers({ module }) {
 
   return (
     <>
+      {error && <Alert kind="error">{error}</Alert>}
       <div className="card">
         <div className="card-header">
           <div className="toolbar grow">
@@ -35,7 +55,7 @@ export default function Transfers({ module }) {
               <input className="input" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
             </Field>
           </div>
-          <button className="btn btn-primary" onClick={() => setShowForm(true)}>
+          <button className="btn btn-primary" onClick={() => setForm('new')}>
             <IconPlus size={18} /> {module === 'BUSINESS' ? 'Перевод / Обмен' : 'Новый перевод'}
           </button>
         </div>
@@ -57,6 +77,7 @@ export default function Transfers({ module }) {
                   <th className="num">Зачислено</th>
                   <th className="num">Курс</th>
                   <th>Комментарий</th>
+                  {isAdmin && <th></th>}
                 </tr>
               </thead>
               <tbody>
@@ -73,6 +94,18 @@ export default function Transfers({ module }) {
                     <td className="num">{money(m.to_amount, m.to_currency)}</td>
                     <td className="num">{m.is_conversion ? Number(m.rate).toLocaleString('ru-RU') : '—'}</td>
                     <td className="muted">{m.description || '—'}</td>
+                    {isAdmin && (
+                      <td className="num">
+                        <div className="row gap-sm" style={{ justifyContent: 'flex-end' }}>
+                          <button className="btn btn-icon btn-ghost btn-sm" title="Изменить" onClick={() => setForm(m)}>
+                            <IconEdit size={16} />
+                          </button>
+                          <button className="btn btn-icon btn-danger btn-sm" title="Удалить" disabled={busyId === m.id} onClick={() => removeTransfer(m)}>
+                            <IconTrash size={16} />
+                          </button>
+                        </div>
+                      </td>
+                    )}
                   </tr>
                 ) : (
                   <tr key={'w' + m.id}>
@@ -87,6 +120,7 @@ export default function Transfers({ module }) {
                     <td className="num muted">—</td>
                     <td className="num">—</td>
                     <td className="muted">{m.description || 'Изъятие собственника'}</td>
+                    {isAdmin && <td className="num"><span className="caption muted" title="Изъятия правятся в разделе «Расходы»">—</span></td>}
                   </tr>
                 ))}
               </tbody>
@@ -99,12 +133,13 @@ export default function Transfers({ module }) {
         </p>
       </div>
 
-      {showForm && (
+      {form && (
         <TransferForm
+          editing={form === 'new' ? null : form}
           accounts={asList(accounts.data)}
-          onClose={() => setShowForm(false)}
+          onClose={() => setForm(null)}
           onSaved={() => {
-            setShowForm(false)
+            setForm(null)
             transfers.reload()
           }}
         />
@@ -113,14 +148,15 @@ export default function Transfers({ module }) {
   )
 }
 
-function TransferForm({ accounts, onClose, onSaved }) {
-  const [fromId, setFromId] = useState(accounts[0]?.id || '')
-  const [toId, setToId] = useState(accounts[1]?.id || accounts[0]?.id || '')
-  const [amount, setAmount] = useState('')
-  const [rate, setRate] = useState('')
-  const [toAmount, setToAmount] = useState('')
-  const [description, setDescription] = useState('')
-  const [date, setDate] = useState(today())
+function TransferForm({ editing, accounts, onClose, onSaved }) {
+  const isEdit = !!editing
+  const [fromId, setFromId] = useState(editing?.from_account ?? (accounts[0]?.id || ''))
+  const [toId, setToId] = useState(editing?.to_account ?? (accounts[1]?.id || accounts[0]?.id || ''))
+  const [amount, setAmount] = useState(editing?.amount ?? '')
+  const [rate, setRate] = useState(editing && Number(editing.rate) !== 1 ? String(editing.rate) : '')
+  const [toAmount, setToAmount] = useState(editing?.to_amount ?? '')
+  const [description, setDescription] = useState(editing?.description ?? '')
+  const [date, setDate] = useState(editing?.date ?? today())
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -154,7 +190,7 @@ function TransferForm({ accounts, onClose, onSaved }) {
     }
     setSaving(true)
     try {
-      await api.post('/transfers/', {
+      const body = {
         from_account: fromId,
         to_account: toId,
         amount,
@@ -162,7 +198,9 @@ function TransferForm({ accounts, onClose, onSaved }) {
         rate: isConversion ? rate || 1 : 1,
         description: description.trim(),
         date,
-      })
+      }
+      if (isEdit) await api.patch(`/transfers/${editing.id}/`, body)
+      else await api.post('/transfers/', body)
       onSaved()
     } catch (err) {
       setError(errorMessage(err))
@@ -173,13 +211,13 @@ function TransferForm({ accounts, onClose, onSaved }) {
 
   return (
     <Modal
-      title="Перевод / Конвертация"
+      title={isEdit ? 'Изменить перевод / обмен' : 'Перевод / Конвертация'}
       onClose={onClose}
       footer={
         <>
           <button className="btn btn-secondary" onClick={onClose}>Отмена</button>
           <button className="btn btn-primary" onClick={submit} disabled={saving}>
-            {saving ? 'Выполнение…' : 'Выполнить'}
+            {saving ? 'Сохранение…' : isEdit ? 'Сохранить' : 'Выполнить'}
           </button>
         </>
       }

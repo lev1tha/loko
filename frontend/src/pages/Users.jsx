@@ -12,6 +12,22 @@ export default function Users() {
   const [busyId, setBusyId] = useState(null)
   const [error, setError] = useState('')
   const rows = asList(users.data)
+  const branches = asList(useFetch('/branches/', { active: 1 }).data)
+
+  // Inline-правка филиала сотрудника прямо в таблице (PATCH только поля branch;
+  // пусто = филиал по умолчанию, сервер подставит его при продаже).
+  async function changeBranch(u, value) {
+    setBusyId(u.id)
+    setError('')
+    try {
+      await api.patch(`/users/${u.id}/`, { branch: value || null })
+      users.reload()
+    } catch (err) {
+      setError(errorMessage(err))
+    } finally {
+      setBusyId(null)
+    }
+  }
 
   async function remove(u) {
     if (!window.confirm(`Удалить пользователя «${u.username}»? Действие необратимо.`)) return
@@ -65,7 +81,23 @@ export default function Users() {
                       <Badge variant={u.is_admin ? 'badge-admin' : 'badge-manager'}>{u.role_display}</Badge>
                     </td>
                     <td className="muted">{u.role === 'DIRECTOR' ? (u.module_display || '—') : '—'}</td>
-                    <td className="muted">{u.role === 'OPERATOR' ? (u.branch_name || 'по умолчанию') : '—'}</td>
+                    <td>
+                      {u.role === 'OPERATOR' ? (
+                        <select
+                          className="select"
+                          style={{ maxWidth: 240, minWidth: 140 }}
+                          value={u.branch ?? ''}
+                          disabled={busyId === u.id}
+                          onChange={(e) => changeBranch(u, e.target.value)}
+                          title="Филиал сотрудника — изменить"
+                        >
+                          <option value="">По умолчанию</option>
+                          {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                        </select>
+                      ) : (
+                        <span className="muted">—</span>
+                      )}
+                    </td>
                     <td>
                       <Badge variant={u.is_active ? 'badge-success' : 'badge-danger'}>
                         {u.is_active ? 'Активен' : 'Отключён'}
