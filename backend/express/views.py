@@ -14,7 +14,7 @@ from drf_spectacular.utils import (
     inline_serializer,
 )
 
-from accounts.permissions import DenyOperatorOrDirector, SalesAccess
+from accounts.permissions import DenyOperatorOrDirector, IsAdmin, SalesAccess
 from finance.models import Account, AppSettings, Branch
 from .models import ClientPrice, Sale
 from .serializers import ClientPriceSerializer, OperatorSaleSerializer, SaleSerializer
@@ -38,6 +38,12 @@ class SaleViewSet(viewsets.ModelViewSet):
     # Managers/admins: full access. Operators («Сотрудник»): create + quote +
     # the minimal account picker only (enforced per-action by SalesAccess).
     permission_classes = [SalesAccess]
+
+    def get_permissions(self):
+        # Экспорт всей таблицы продаж (с финансовыми полями) — только администратор.
+        if self.action == "export":
+            return [IsAdmin()]
+        return [SalesAccess()]
 
     def get_serializer_class(self):
         # Операторам — узкий сериализатор без финансовых полей: ни себестоимость/
@@ -105,6 +111,86 @@ class SaleViewSet(viewsets.ModelViewSet):
                 "weight": agg["weight"] or ZERO,
             }
         )
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter("from", OpenApiTypes.DATE, description="Начало периода"),
+            OpenApiParameter("to", OpenApiTypes.DATE, description="Конец периода"),
+            OpenApiParameter("payment", OpenApiTypes.STR, enum=["all", "cash", "noncash"], description="Вид оплаты"),
+            OpenApiParameter("search", OpenApiTypes.STR, description="Поиск по коду клиента"),
+            OpenApiParameter("branch", OpenApiTypes.INT, description="Филиал Express (id)"),
+        ],
+        responses=OpenApiTypes.BINARY,
+    )
+    @action(detail=False, methods=["get"], url_path="export")
+    def export(self, request):
+        """Выгрузка продаж Express (по текущим фильтрам) в Excel — только администратор.
+
+        Полная таблица с финансами: себестоимость, маржа, дебиторка + итоговая строка.
+        Фильтры (даты/оплата/поиск/филиал) — те же, что и в списке (``get_queryset``).
+        """
+        qs = self.get_queryset().select_related("account", "branch").order_by("-date", "-id")
+        return self._export_xlsx(qs)
+
+    @staticmethod
+    def _export_xlsx(qs):
+        """Полная выгрузка продаж Express в .xlsx (openpyxl) с итоговой строкой."""
+        from django.http import HttpResponse
+        from openpyxl import Workbook
+        from openpyxl.styles import Font
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Продажи Express"
+        headers = [
+            "Дата", "Код клиента", "Режим", "Вес, кг", "Кол-во", "Счёт", "Филиал",
+            "Начислено, сом", "Оплачено, сом", "Дебиторка, сом",
+            "Себестоимость, сом", "Маржа, сом", "Дата оплаты",
+        ]
+        ws.append(headers)
+        for cell in ws[1]:
+            cell.font = Font(bold=True)
+
+        t_price = t_paid = t_recv = t_cost = t_margin = ZERO
+        for s in qs:
+            price = s.price_som or ZERO
+            paid = s.paid_som or ZERO
+            recv = s.receivable_som
+            cost = s.cost_som or ZERO
+            margin = s.margin_som or ZERO
+            t_price += price
+            t_paid += paid
+            t_recv += recv
+            t_cost += cost
+            t_margin += margin
+            ws.append([
+                s.date.strftime("%d.%m.%Y") if s.date else "",
+                s.client_code,
+                s.get_amount_mode_display(),
+                float(s.weight_kg) if s.weight_kg is not None else None,
+                s.places,
+                s.account.name if s.account_id else "",
+                s.branch.name if s.branch_id else "—",
+                float(price), float(paid), float(recv), float(cost), float(margin),
+                s.payment_date.strftime("%d.%m.%Y") if s.payment_date else "",
+            ])
+
+        ws.append([
+            "ИТОГО", "", "", "", "", "", "",
+            float(t_price), float(t_paid), float(t_recv), float(t_cost), float(t_margin), "",
+        ])
+        for cell in ws[ws.max_row]:
+            cell.font = Font(bold=True)
+
+        for i, width in enumerate((12, 16, 16, 10, 8, 16, 26, 15, 14, 14, 16, 14, 12)):
+            ws.column_dimensions[ws.cell(row=1, column=i + 1).column_letter].width = width
+
+        resp = HttpResponse(
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        resp["Content-Disposition"] = 'attachment; filename="sales-express.xlsx"'
+        wb.save(resp)
+        return resp
 
     @extend_schema(
         parameters=[

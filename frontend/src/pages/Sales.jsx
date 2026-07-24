@@ -5,6 +5,7 @@ import { firstOfMonth, today, som, kg, dateRu, signClass } from '../lib/format'
 import { Alert, Badge, EmptyState, Field, Modal, Segmented, Spinner, Stat } from '../components/ui'
 import { IconPlus, IconEdit, IconTrash } from '../components/icons'
 import { compareRows } from '../lib/sales'
+import { useAuth } from '../auth/AuthContext'
 
 // Заголовок-кнопка для сортировки таблицы продаж.
 function Th({ label, sortKey, sort, onSort, num }) {
@@ -30,6 +31,7 @@ const MODES = [
 ]
 
 export default function Sales() {
+  const { isAdmin } = useAuth()
   const [from, setFrom] = useState(firstOfMonth())
   const [to, setTo] = useState(today())
   const [payment, setPayment] = useState('all')
@@ -44,6 +46,7 @@ export default function Sales() {
   const [editCell, setEditCell] = useState(null) // inline-правка суммы в таблице: {id, value}
   const [savingCell, setSavingCell] = useState(false)
   const [branch, setBranch] = useState('') // фильтр по филиалу ('' = все)
+  const [exporting, setExporting] = useState(false)
 
   const params = { from, to, payment, search: search || undefined, page_size: 10000, ...(branch ? { branch } : {}) }
   const sales = useFetch('/sales/', params)
@@ -111,6 +114,30 @@ export default function Sales() {
     }
   }
 
+  // Выгрузка продаж в Excel по текущим фильтрам (admin-only; JWT в заголовке → blob).
+  async function exportXlsx() {
+    setError('')
+    setExporting(true)
+    try {
+      const res = await api.get('/sales/export/', {
+        params: { from, to, payment, search: search || undefined, ...(branch ? { branch } : {}) },
+        responseType: 'blob',
+      })
+      const url = URL.createObjectURL(res.data)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'prodazhi-express.xlsx'
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      setError(errorMessage(err))
+    } finally {
+      setExporting(false)
+    }
+  }
+
   return (
     <>
       {error && <Alert kind="error">{error}</Alert>}
@@ -166,9 +193,22 @@ export default function Sales() {
               </select>
             </Field>
           </div>
-          <button className="btn btn-primary" onClick={() => setForm('new')}>
-            <IconPlus size={18} /> Новая продажа
-          </button>
+          <div className="row gap-sm">
+            {isAdmin && (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={exportXlsx}
+                disabled={exporting || !rows.length}
+                title="Выгрузить продажи (по текущим фильтрам) в Excel"
+              >
+                {exporting ? 'Выгрузка…' : 'Экспорт в Excel'}
+              </button>
+            )}
+            <button className="btn btn-primary" onClick={() => setForm('new')}>
+              <IconPlus size={18} /> Новая продажа
+            </button>
+          </div>
         </div>
 
         {!sales.loading && rows.length > 0 && (
