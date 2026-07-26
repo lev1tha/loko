@@ -517,6 +517,37 @@ textarea.input { height: auto; padding: 10px 14px; resize: vertical; min-height:
 .alert-success { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
 .alert-warning { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
 
+/* ── Складской модуль (доска сборки заказов) ───────────────────────── */
+.wh-page { display: flex; flex-direction: column; }
+.wh-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.wh-head-actions { flex-wrap: wrap; }
+.wh-board { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; align-items: start; }
+@media (max-width: 900px) { .wh-board { grid-template-columns: 1fr; } }
+.wh-col { background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 14px; padding: 12px; min-height: 120px; }
+.wh-col-new { border-top: 4px solid #f59e0b; }
+.wh-col-in_progress { border-top: 4px solid #3b82f6; }
+.wh-col-ready { border-top: 4px solid #10b981; background: #f0fdf4; }
+.wh-col-head { display: flex; justify-content: space-between; align-items: center; }
+.wh-col-label { font-weight: 700; font-size: 15px; }
+.wh-col-count { background: #111827; color: #fff; border-radius: 999px; min-width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; padding: 0 8px; font-size: 13px; font-weight: 700; }
+.wh-col-sub { color: #6b7280; font-size: 12px; margin: 2px 0 10px; }
+.wh-col-body { display: flex; flex-direction: column; gap: 10px; }
+.wh-empty { color: #9ca3af; font-size: 13px; text-align: center; padding: 16px 0; }
+.wh-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 12px; box-shadow: 0 1px 2px rgba(0, 0, 0, .04); }
+.wh-card-new { border-left: 3px solid #f59e0b; }
+.wh-card-ready { border-left: 3px solid #10b981; }
+.wh-card-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.wh-card-id { font-weight: 700; color: #6b7280; font-size: 13px; }
+.wh-card-branch { font-size: 11px; color: #6b7280; background: #f3f4f6; border-radius: 6px; padding: 2px 6px; }
+.wh-codes { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.wh-code { font-weight: 700; font-size: 15px; background: #eef2ff; color: #3730a3; border-radius: 8px; padding: 4px 10px; letter-spacing: .3px; }
+.wh-comment { font-size: 13px; color: #b45309; margin-bottom: 6px; }
+.wh-assigned { font-size: 12px; color: #6b7280; margin-bottom: 8px; }
+.wh-actions { display: flex; flex-direction: column; gap: 6px; }
+.wh-btn-ready { background: #10b981; border-color: #10b981; }
+.wh-btn-ready:hover { background: #059669; border-color: #059669; }
+.wh-mini-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 0; border-bottom: 1px solid #f1f5f9; }
+
 /* Поле «только для чтения» (расчётный вес из суммы) — видно, но не редактируется. */
 .input-readonly {
   background: var(--surface-card);

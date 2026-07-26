@@ -51,6 +51,8 @@ export function AuthProvider({ children }) {
     // Филиал сотрудника (Loko Express) — для предзаполнения/показа в форме продажи.
     userBranch: user?.branch ?? null,
     userBranchName: user?.branch_name ?? null,
+    // «Складовщик» — только складской модуль (сборка/выдача) своего филиала.
+    isWarehouse: user?.role === 'WAREHOUSE',
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

@@ -30,6 +30,7 @@ const GROUPS = [
     title: 'Loko Express',
     items: [
       { to: '/sales', label: 'Продажи', icon: IconSales },
+      { to: '/warehouse', label: 'Склад', icon: IconBox },
       { to: '/express/client-prices', label: 'Цены клиентов', icon: IconAccounts },
       { to: '/express/other-income', label: 'Прочий доход', icon: IconSales },
       { to: '/express/expenses', label: 'Расходы', icon: IconExpense },
@@ -83,6 +84,7 @@ const TITLES = {
   '/control': ['Сверка', 'Как складываются итоги — сверка с тетрадью'],
   '/journal': ['История операций', 'Все события (Express + Business) и как из них вышли цифры'],
   '/sales': ['Продажи', 'Loko Express · учёт карго и расчёт маржи'],
+  '/warehouse': ['Склад', 'Сборка заказов — статусы заявок в реальном времени'],
   '/express/client-prices': ['Цены клиентов', 'Индивидуальная цена за кг по клиентам (исключения из цены по умолчанию)'],
   '/express/other-income': ['Прочий доход', 'Доходы не от карго — в выручку без себестоимости 55%'],
   '/express/expenses': ['Расходы · Loko Express', 'Типы расходов, изъятия и статьи — по Express'],

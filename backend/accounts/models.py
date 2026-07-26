@@ -19,6 +19,7 @@ class User(AbstractUser):
         MANAGER = "MANAGER", "Кассир/Менеджер"
         DIRECTOR = "DIRECTOR", "Директор"
         OPERATOR = "OPERATOR", "Сотрудник"
+        WAREHOUSE = "WAREHOUSE", "Складовщик"
 
     class Direction(models.TextChoices):
         EXPRESS = "EXPRESS", "Loko Express"
@@ -73,6 +74,15 @@ class User(AbstractUser):
         A superuser is never treated as an operator (full access wins).
         """
         return self.role == self.Role.OPERATOR and not self.is_superuser
+
+    @property
+    def is_warehouse(self) -> bool:
+        """«Складовщик» — только складской модуль (сборка/выдача) своего филиала;
+        без доступа к финансам, отчётам и продажам.
+
+        A superuser is never treated as a warehouse worker (full access wins).
+        """
+        return self.role == self.Role.WAREHOUSE and not self.is_superuser
 
     def __str__(self) -> str:
         return f"{self.username} ({self.get_role_display()})"

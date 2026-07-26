@@ -225,3 +225,65 @@ class ClientPrice(models.Model):
 
     def __str__(self) -> str:
         return f"{self.client_code}: {self.price_per_kg_som} сом/кг"
+
+
+class WarehouseOrder(models.Model):
+    """Заявка на сборку (склад Loko Express).
+
+    Оператор/менеджер филиала формирует заявку из 1–5 кодов клиентов; складовщик
+    ведёт её по статусам (в поиске → готова), кассир выдаёт после оплаты. Заявка
+    привязана к филиалу — складовщик видит только заявки своего филиала.
+    """
+
+    class Status(models.TextChoices):
+        NEW = "NEW", "Новая"
+        IN_PROGRESS = "IN_PROGRESS", "В поиске"
+        READY = "READY", "Готова к выдаче"
+        ISSUED = "ISSUED", "Выдано"
+        CANCELLED = "CANCELLED", "Отменена"
+
+    # Разрешённые переходы статусов (валидируются в сериализаторе/вьюсете).
+    TRANSITIONS = {
+        "NEW": {"IN_PROGRESS", "CANCELLED"},
+        "IN_PROGRESS": {"READY", "CANCELLED", "NEW"},
+        "READY": {"ISSUED", "IN_PROGRESS", "CANCELLED"},
+        "ISSUED": set(),
+        "CANCELLED": set(),
+    }
+    MAX_CODES = 5
+
+    branch = models.ForeignKey(
+        "finance.Branch", on_delete=models.PROTECT, related_name="warehouse_orders",
+        verbose_name="Филиал сборки",
+    )
+    created_by = models.ForeignKey(
+        dj_settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
+        related_name="warehouse_orders_created", verbose_name="Создал (оператор/менеджер)",
+    )
+    assigned_to = models.ForeignKey(
+        dj_settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="warehouse_orders_assigned", verbose_name="Складовщик",
+    )
+    status = models.CharField(
+        max_length=12, choices=Status.choices, default=Status.NEW, verbose_name="Статус",
+    )
+    # Коды клиентов (1–5). JSONField — работает и на SQLite (dev), и на PostgreSQL.
+    client_codes = models.JSONField(default=list, verbose_name="Коды клиентов (1–5)")
+    sales = models.ManyToManyField(
+        Sale, blank=True, related_name="warehouse_orders", verbose_name="Связанные продажи",
+    )
+    comment = models.TextField(blank=True, verbose_name="Комментарий / причина отмены")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Заявка на сборку"
+        verbose_name_plural = "Заявки на сборку (склад)"
+        ordering = ("-created_at", "-id")
+
+    def __str__(self) -> str:
+        branch = self.branch.name if self.branch_id else "—"
+        return f"Заявка #{self.pk} · {self.get_status_display()} · {branch}"
+
+    def can_transition_to(self, new_status: str) -> bool:
+        return new_status in self.TRANSITIONS.get(self.status, set())

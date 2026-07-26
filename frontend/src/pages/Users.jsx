@@ -82,14 +82,14 @@ export default function Users() {
                     </td>
                     <td className="muted">{u.role === 'DIRECTOR' ? (u.module_display || '—') : '—'}</td>
                     <td>
-                      {u.role === 'OPERATOR' ? (
+                      {(u.role === 'OPERATOR' || u.role === 'WAREHOUSE') ? (
                         <select
                           className="select"
                           style={{ maxWidth: 240, minWidth: 140 }}
                           value={u.branch ?? ''}
                           disabled={busyId === u.id}
                           onChange={(e) => changeBranch(u, e.target.value)}
-                          title="Филиал сотрудника — изменить"
+                          title="Филиал — изменить"
                         >
                           <option value="">По умолчанию</option>
                           {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
@@ -164,6 +164,8 @@ function UserForm({ editing, onClose, onSaved }) {
   const defaultBranch = branches.find((b) => b.is_default)
   const isDirector = role === 'DIRECTOR'
   const isOperator = role === 'OPERATOR'
+  const isWarehouse = role === 'WAREHOUSE'
+  const needsBranch = isOperator || isWarehouse
 
   async function submit(e) {
     e.preventDefault()
@@ -175,8 +177,8 @@ function UserForm({ editing, onClose, onSaved }) {
         role,
         // Направление шлём только для директора (остальным сервер обнулит).
         module: isDirector ? module : null,
-        // Филиал — только для сотрудника; пусто = филиал по умолчанию (Гульчинская).
-        branch: isOperator ? (branchId || null) : null,
+        // Филиал — для сотрудника и складовщика; пусто = филиал по умолчанию.
+        branch: needsBranch ? (branchId || null) : null,
       }
       // Пароль: при создании обязателен; при правке — шлём, только если введён новый.
       if (password) body.password = password
@@ -227,6 +229,7 @@ function UserForm({ editing, onClose, onSaved }) {
             <option value="MANAGER">Кассир/Менеджер</option>
             <option value="DIRECTOR">Директор (только просмотр отчётов направления)</option>
             <option value="OPERATOR">Сотрудник (только добавление продаж)</option>
+            <option value="WAREHOUSE">Складовщик (только склад своего филиала)</option>
             <option value="ADMIN">Администратор</option>
           </select>
         </Field>
@@ -238,8 +241,8 @@ function UserForm({ editing, onClose, onSaved }) {
             </select>
           </Field>
         )}
-        {isOperator && (
-          <Field label="Филиал сотрудника" hint="Куда попадут его продажи (можно изменить позже)">
+        {needsBranch && (
+          <Field label={isWarehouse ? 'Филиал склада' : 'Филиал сотрудника'} hint="Можно изменить позже">
             <select className="select" value={branchId} onChange={(e) => setBranchId(e.target.value)}>
               <option value="">По умолчанию{defaultBranch ? ` — ${defaultBranch.name}` : ''}</option>
               {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}

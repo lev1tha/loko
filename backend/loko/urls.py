@@ -10,7 +10,7 @@ from drf_spectacular.views import (
 
 from accounts.views import LokoTokenObtainPairView, UserViewSet
 from business.views import DebtViewSet, DepositViewSet
-from express.views import ClientPriceViewSet, SaleViewSet
+from express.views import ClientPriceViewSet, SaleViewSet, WarehouseOrderViewSet
 from finance.views import (
     AccountViewSet,
     AppSettingsView,
@@ -37,6 +37,7 @@ router.register("other-income", OtherIncomeViewSet, basename="other-income")
 router.register("transfers", TransferViewSet, basename="transfer")
 router.register("sales", SaleViewSet, basename="sale")
 router.register("client-prices", ClientPriceViewSet, basename="client-price")
+router.register("warehouse-orders", WarehouseOrderViewSet, basename="warehouse-order")
 router.register("deposits", DepositViewSet, basename="deposit")
 router.register("debts", DebtViewSet, basename="debt")
 

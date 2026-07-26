@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import ClientPrice, Sale
+from .models import ClientPrice, Sale, WarehouseOrder
 
 
 class SaleSerializer(serializers.ModelSerializer):
@@ -164,3 +164,45 @@ class ClientPriceSerializer(serializers.ModelSerializer):
         if value <= 0:
             raise serializers.ValidationError("Цена за кг должна быть больше нуля.")
         return value
+
+
+class WarehouseOrderSerializer(serializers.ModelSerializer):
+    """Заявка на сборку (склад). Создаёт оператор/менеджер; статус меняется через
+    отдельный action (status), поэтому здесь он read-only."""
+
+    branch_name = serializers.CharField(source="branch.name", read_only=True, default=None)
+    created_by_name = serializers.CharField(source="created_by.username", read_only=True, default=None)
+    assigned_to_name = serializers.CharField(source="assigned_to.username", read_only=True, default=None)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
+    class Meta:
+        model = WarehouseOrder
+        fields = (
+            "id", "branch", "branch_name", "created_by", "created_by_name",
+            "assigned_to", "assigned_to_name", "status", "status_display",
+            "client_codes", "comment", "created_at", "updated_at",
+        )
+        read_only_fields = (
+            "created_by", "assigned_to", "status", "created_at", "updated_at",
+        )
+        extra_kwargs = {
+            # Филиал: у оператора/менеджера подставляется на сервере (perform_create).
+            "branch": {"required": False},
+        }
+
+    def validate_client_codes(self, value):
+        if not isinstance(value, list):
+            raise serializers.ValidationError("Коды клиентов должны быть списком.")
+        codes = [str(c).strip() for c in value if str(c).strip()]
+        if not (1 <= len(codes) <= WarehouseOrder.MAX_CODES):
+            raise serializers.ValidationError(
+                f"Укажите от 1 до {WarehouseOrder.MAX_CODES} кодов клиентов."
+            )
+        return codes
+
+
+class WarehouseStatusSerializer(serializers.Serializer):
+    """Смена статуса заявки (складовщик/кассир). Валидация перехода — во вьюсете."""
+
+    status = serializers.ChoiceField(choices=WarehouseOrder.Status.choices)
+    comment = serializers.CharField(required=False, allow_blank=True, default="")

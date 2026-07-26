@@ -14,6 +14,9 @@ import ClientPrices from './pages/ClientPrices'
 import OtherIncome from './pages/OtherIncome'
 import OperatorSale from './pages/OperatorSale'
 import OperatorMySales from './pages/OperatorMySales'
+import OperatorWarehouse from './pages/OperatorWarehouse'
+import WarehouseLayout from './components/WarehouseLayout'
+import WarehouseDashboard from './pages/WarehouseDashboard'
 import Expenses from './pages/Expenses'
 import Accounts from './pages/Accounts'
 import Transfers from './pages/Transfers'
@@ -41,7 +44,7 @@ export default function App() {
 }
 
 function AppRoutes() {
-  const { isOperator, isDirector, directorModule } = useAuth()
+  const { isOperator, isDirector, isWarehouse, directorModule } = useAuth()
 
   // Роль «Сотрудник» получает ОТДЕЛЬНОЕ приложение: только страница добавления
   // продаж Express. Любой другой путь возвращает на неё — никаких финансов.
@@ -58,6 +61,7 @@ function AppRoutes() {
         >
           <Route index element={<OperatorSale />} />
           <Route path="my-sales" element={<OperatorMySales />} />
+          <Route path="warehouse-order" element={<OperatorWarehouse />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
@@ -85,6 +89,26 @@ function AppRoutes() {
     )
   }
 
+  // Роль «Складовщик» — ОТДЕЛЬНОЕ приложение: доска сборки заказов своего филиала.
+  // Любой путь возвращает на доску.
+  if (isWarehouse) {
+    return (
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route
+          element={
+            <ProtectedRoute>
+              <WarehouseLayout />
+            </ProtectedRoute>
+          }
+        >
+          <Route index element={<WarehouseDashboard />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Route>
+      </Routes>
+    )
+  }
+
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
@@ -99,6 +123,7 @@ function AppRoutes() {
         <Route index element={<Dashboard />} />
         <Route path="control" element={<Control />} />
         <Route path="journal" element={<Journal />} />
+        <Route path="warehouse" element={<WarehouseDashboard />} />
 
         {/* Loko Express */}
         <Route path="sales" element={<Sales />} />

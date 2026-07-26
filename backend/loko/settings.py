@@ -214,6 +214,11 @@ SPECTACULAR_SETTINGS = {
         "ModuleEnum": "finance.models.Module",
         "DirectorDirectionEnum": "accounts.models.User.Direction",
         "ModuleParamEnum": ["EXPRESS", "BUSINESS"],
+        # Несколько enum-ов с полем «status» (депозиты, задолженности, заявки склада)
+        # — даём каждому стабильное имя, иначе spectacular ругается на коллизию.
+        "DepositStatusEnum": "business.models.Deposit.Status",
+        "DebtStatusEnum": "business.models.Debt.Status",
+        "WarehouseStatusEnum": "express.models.WarehouseOrder.Status",
     },
 }
 

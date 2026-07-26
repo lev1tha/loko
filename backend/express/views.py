@@ -14,10 +14,16 @@ from drf_spectacular.utils import (
     inline_serializer,
 )
 
-from accounts.permissions import DenyOperatorOrDirector, IsAdmin, SalesAccess
+from accounts.permissions import DenyOperatorOrDirector, IsAdmin, SalesAccess, WarehouseAccess
 from finance.models import Account, AppSettings, Branch
-from .models import ClientPrice, Sale
-from .serializers import ClientPriceSerializer, OperatorSaleSerializer, SaleSerializer
+from .models import ClientPrice, Sale, WarehouseOrder
+from .serializers import (
+    ClientPriceSerializer,
+    OperatorSaleSerializer,
+    SaleSerializer,
+    WarehouseOrderSerializer,
+    WarehouseStatusSerializer,
+)
 
 ZERO = Decimal("0.00")
 
@@ -421,3 +427,92 @@ class ClientPriceViewSet(viewsets.ModelViewSet):
             serializer.save()
             return Response(serializer.data)
         return super().create(request, *args, **kwargs)
+
+
+@extend_schema_view(
+    list=extend_schema(
+        parameters=[
+            OpenApiParameter("status", OpenApiTypes.STR, enum=[s.value for s in WarehouseOrder.Status], description="Фильтр по статусу"),
+            OpenApiParameter("branch", OpenApiTypes.INT, description="Филиал (менеджер/админ)"),
+            OpenApiParameter("search", OpenApiTypes.STR, description="Поиск по коду клиента"),
+            OpenApiParameter("active", OpenApiTypes.STR, description="1 = только активные (не Выдано/Отменена)"),
+        ]
+    )
+)
+class WarehouseOrderViewSet(viewsets.ModelViewSet):
+    """Заявки на сборку (склад Loko Express).
+
+    * Складовщик/оператор — видят только СВОЙ филиал.
+    * Менеджер/админ — все заявки (фильтры status/branch/search).
+    Статус меняется через action ``status`` (валидация перехода + роли).
+    """
+
+    serializer_class = WarehouseOrderSerializer
+    permission_classes = [WarehouseAccess]
+
+    def get_queryset(self):
+        qs = WarehouseOrder.objects.select_related("branch", "created_by", "assigned_to")
+        user = self.request.user
+        params = self.request.query_params
+        # Склад и оператор — только заявки своего филиала.
+        if getattr(user, "is_warehouse", False) or getattr(user, "is_operator", False):
+            qs = qs.filter(branch=user.branch) if user.branch_id else qs.none()
+        else:
+            branch = params.get("branch")
+            if branch:
+                qs = qs.filter(branch=branch)
+        status = params.get("status")
+        if status:
+            qs = qs.filter(status=status)
+        if params.get("active") in ("1", "true", "True"):
+            qs = qs.exclude(status__in=[WarehouseOrder.Status.ISSUED, WarehouseOrder.Status.CANCELLED])
+        search = (params.get("search") or "").strip().lower()
+        if search:
+            ids = [o.id for o in qs if any(search in str(c).lower() for c in (o.client_codes or []))]
+            qs = qs.filter(id__in=ids)
+        return qs
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        # Филиал заявки: у оператора — его филиал; у менеджера/админа — выбранный,
+        # иначе филиал по умолчанию (как у продаж).
+        if getattr(user, "is_operator", False):
+            branch = user.branch or Branch.resolve_default()
+        else:
+            branch = serializer.validated_data.get("branch") or user.branch or Branch.resolve_default()
+        serializer.save(created_by=user, branch=branch, status=WarehouseOrder.Status.NEW)
+
+    @extend_schema(request=WarehouseStatusSerializer, responses=WarehouseOrderSerializer)
+    @action(detail=True, methods=["patch", "post"], url_path="status")
+    def status(self, request, pk=None):
+        """Смена статуса заявки.
+
+        Складовщик: В поиске / Готова / Отмена (не «Выдано»). Кассир/менеджер/админ:
+        любой валидный переход, включая «Выдано» (после оплаты). Переход проверяется
+        по карте TRANSITIONS; для отмены комментарий обязателен; «Взять в работу»
+        фиксирует складовщика (assigned_to)."""
+        order = self.get_object()
+        ser = WarehouseStatusSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        new_status = ser.validated_data["status"]
+        comment = (ser.validated_data.get("comment") or "").strip()
+        user = request.user
+        labels = dict(WarehouseOrder.Status.choices)
+
+        # «Выдано» отмечает кассир/менеджер/админ после оплаты — не складовщик.
+        if new_status == WarehouseOrder.Status.ISSUED and getattr(user, "is_warehouse", False):
+            raise serializers.ValidationError({"status": "«Выдано» отмечает кассир/менеджер после оплаты."})
+        if new_status != order.status and not order.can_transition_to(new_status):
+            raise serializers.ValidationError(
+                {"status": f"Недопустимый переход: {order.get_status_display()} → {labels.get(new_status, new_status)}."}
+            )
+        if new_status == WarehouseOrder.Status.CANCELLED and not comment:
+            raise serializers.ValidationError({"comment": "Укажите причину отмены."})
+
+        order.status = new_status
+        if comment:
+            order.comment = comment
+        if new_status == WarehouseOrder.Status.IN_PROGRESS and order.assigned_to_id is None:
+            order.assigned_to = user
+        order.save()
+        return Response(WarehouseOrderSerializer(order).data)

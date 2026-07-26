@@ -9,6 +9,10 @@ def _is_director(user) -> bool:
     return bool(user and user.is_authenticated and getattr(user, "is_director", False))
 
 
+def _is_warehouse(user) -> bool:
+    return bool(user and user.is_authenticated and getattr(user, "is_warehouse", False))
+
+
 class IsAdmin(BasePermission):
     """Allow access only to administrators."""
 
@@ -34,11 +38,15 @@ class DenyOperator(BasePermission):
     (reports, settings, accounts, expenses, transfers, deposits, debts, …).
     """
 
-    message = "Недостаточно прав: раздел недоступен для роли «Сотрудник»."
+    message = "Недостаточно прав: раздел недоступен для этой роли."
 
     def has_permission(self, request, view):
         user = request.user
-        return bool(user and user.is_authenticated and not _is_operator(user))
+        return bool(
+            user and user.is_authenticated
+            and not _is_operator(user)
+            and not _is_warehouse(user)
+        )
 
 
 class DenyOperatorOrDirector(BasePermission):
@@ -59,6 +67,7 @@ class DenyOperatorOrDirector(BasePermission):
             and user.is_authenticated
             and not _is_operator(user)
             and not _is_director(user)
+            and not _is_warehouse(user)
         )
 
 
@@ -84,8 +93,36 @@ class SalesAccess(BasePermission):
         user = request.user
         if not (user and user.is_authenticated):
             return False
-        if _is_director(user):
+        if _is_director(user) or _is_warehouse(user):
             return False
         if _is_operator(user):
             return getattr(view, "action", None) in self.OPERATOR_ACTIONS
         return True
+
+
+class WarehouseAccess(BasePermission):
+    """Доступ к складскому модулю (заявки на сборку Loko Express).
+
+    * Admin / Manager — полный доступ: создание, список всех филиалов, любые статусы
+      (включая ISSUED «Выдано» после оплаты).
+    * Warehouse («Складовщик») — только заявки СВОЕГО филиала: список/просмотр +
+      смена статуса сборки (взять в работу / готово / отмена). Не «Выдаёт» (это
+      кассир) и не создаёт заявки. Филиал и запрет ISSUED — на уровне вьюсета.
+    * Operator («Сотрудник») — создать заявку и видеть заявки своего филиала.
+    * Director — нет доступа.
+    """
+
+    message = "Недостаточно прав для складского модуля."
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not (user and user.is_authenticated):
+            return False
+        if _is_director(user):
+            return False
+        action = getattr(view, "action", None)
+        if _is_warehouse(user):
+            return action in {"list", "retrieve", "status"}
+        if _is_operator(user):
+            return action in {"list", "retrieve", "create"}
+        return True  # Manager / Admin — полный доступ

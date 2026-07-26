@@ -36,6 +36,9 @@ export default function OperatorLayout() {
         <NavLink to="/my-sales" className={linkClass}>
           Мои продажи
         </NavLink>
+        <NavLink to="/warehouse-order" className={linkClass}>
+          Заявка на склад
+        </NavLink>
       </nav>
 
       <main className="operator-main">
