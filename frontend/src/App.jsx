@@ -123,7 +123,6 @@ function AppRoutes() {
         <Route index element={<Dashboard />} />
         <Route path="control" element={<Control />} />
         <Route path="journal" element={<Journal />} />
-        <Route path="warehouse" element={<WarehouseDashboard />} />
 
         {/* Loko Express */}
         <Route path="sales" element={<Sales />} />

@@ -24,8 +24,10 @@ function shortBranch(name) {
 // видят все филиалы, создают заявки и «выдают». Авто-обновление (polling ~7с).
 export default function WarehouseDashboard() {
   const { isWarehouse } = useAuth()
-  const canCreate = !isWarehouse // заявки создают оператор/менеджер/админ, не складовщик
-  const canIssue = !isWarehouse // «Выдать» — кассир/менеджер/админ (после оплаты)
+  // Доска — отдельное приложение складовщика: он ведёт весь цикл сам
+  // (создать → в поиск → готова → выдать клиенту).
+  const canCreate = true
+  const canIssue = true
 
   const [search, setSearch] = useState('')
   const [showCreate, setShowCreate] = useState(false)
@@ -99,7 +101,6 @@ export default function WarehouseDashboard() {
       {canCreate && showCreate && (
         <div className="card" style={{ marginBottom: 16, maxWidth: 520 }}>
           <WarehouseOrderForm
-            showBranch
             branches={asList(branchesReq.data)}
             onCreated={() => { setShowCreate(false); req.reload() }}
           />

@@ -476,7 +476,7 @@ class WarehouseOrderViewSet(viewsets.ModelViewSet):
         user = self.request.user
         # Филиал заявки: у оператора — его филиал; у менеджера/админа — выбранный,
         # иначе филиал по умолчанию (как у продаж).
-        if getattr(user, "is_operator", False):
+        if getattr(user, "is_operator", False) or getattr(user, "is_warehouse", False):
             branch = user.branch or Branch.resolve_default()
         else:
             branch = serializer.validated_data.get("branch") or user.branch or Branch.resolve_default()
@@ -485,12 +485,10 @@ class WarehouseOrderViewSet(viewsets.ModelViewSet):
     @extend_schema(request=WarehouseStatusSerializer, responses=WarehouseOrderSerializer)
     @action(detail=True, methods=["patch", "post"], url_path="status")
     def status(self, request, pk=None):
-        """Смена статуса заявки.
+        """Смена статуса заявки по карте TRANSITIONS.
 
-        Складовщик: В поиске / Готова / Отмена (не «Выдано»). Кассир/менеджер/админ:
-        любой валидный переход, включая «Выдано» (после оплаты). Переход проверяется
-        по карте TRANSITIONS; для отмены комментарий обязателен; «Взять в работу»
-        фиксирует складовщика (assigned_to)."""
+        Складовщик ведёт весь цикл: в поиск → готова → выдано (либо отмена с
+        обязательной причиной). «Взять в работу» фиксирует складовщика (assigned_to)."""
         order = self.get_object()
         ser = WarehouseStatusSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
@@ -499,9 +497,6 @@ class WarehouseOrderViewSet(viewsets.ModelViewSet):
         user = request.user
         labels = dict(WarehouseOrder.Status.choices)
 
-        # «Выдано» отмечает кассир/менеджер/админ после оплаты — не складовщик.
-        if new_status == WarehouseOrder.Status.ISSUED and getattr(user, "is_warehouse", False):
-            raise serializers.ValidationError({"status": "«Выдано» отмечает кассир/менеджер после оплаты."})
         if new_status != order.status and not order.can_transition_to(new_status):
             raise serializers.ValidationError(
                 {"status": f"Недопустимый переход: {order.get_status_display()} → {labels.get(new_status, new_status)}."}

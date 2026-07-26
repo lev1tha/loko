@@ -122,7 +122,7 @@ class WarehouseAccess(BasePermission):
             return False
         action = getattr(view, "action", None)
         if _is_warehouse(user):
-            return action in {"list", "retrieve", "status"}
+            return action in {"list", "retrieve", "create", "status"}
         if _is_operator(user):
             return action in {"list", "retrieve", "create"}
         return True  # Manager / Admin — полный доступ
