@@ -89,7 +89,17 @@ class SaleViewSet(viewsets.ModelViewSet):
             branch = user.branch or Branch.resolve_default()
         else:
             branch = serializer.validated_data.get("branch") or Branch.resolve_default()
-        serializer.save(created_by=user, branch=branch)
+        sale = serializer.save(created_by=user, branch=branch)
+        # «Новая продажа» оператора = заявка на склад: автоматически создаём заявку
+        # на сборку из кода клиента — складовщик сразу её видит.
+        if getattr(user, "is_operator", False) and sale.client_code:
+            wo = WarehouseOrder.objects.create(
+                branch=branch,
+                created_by=user,
+                client_codes=[sale.client_code.strip()],
+                status=WarehouseOrder.Status.NEW,
+            )
+            wo.sales.add(sale)
 
     @extend_schema(responses=OpenApiTypes.OBJECT)
     @action(detail=False, methods=["get"])

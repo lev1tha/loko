@@ -2,28 +2,16 @@ import { useEffect, useRef, useState } from 'react'
 import api, { errorMessage } from '../api/client'
 import { useFetch, asList } from '../lib/hooks'
 import { today, som, kg, dateRu } from '../lib/format'
-import { Alert, Badge, Field, Modal, Segmented } from '../components/ui'
+import { Alert, Field, Modal, Segmented } from '../components/ui'
 import { LoadingTruck } from '../components/states'
 import { IconPlus } from '../components/icons'
 import { useAuth } from '../auth/AuthContext'
-import WarehouseOrderForm from '../components/WarehouseOrderForm'
 
 // «Прямая сумма» — первой и по умолчанию (основной режим для сотрудников),
 // «По весу» — вторым.
 const MODES = [
   { value: 'DIRECT', label: 'Прямая сумма' },
   { value: 'WEIGHT', label: 'По весу' },
-]
-
-const WH_STATUS_VARIANT = {
-  NEW: 'badge-manager', IN_PROGRESS: 'badge-bank', READY: 'badge-success',
-  ISSUED: 'badge-admin', CANCELLED: 'badge-danger',
-}
-
-// Один экран — две логики: продажа и заявка на склад (переключаются тумблером).
-const TABS = [
-  { value: 'sale', label: 'Продажа' },
-  { value: 'warehouse', label: 'Заявка на склад' },
 ]
 
 // Страница роли «Сотрудник»: только добавление продажи в Loko Express.
@@ -38,11 +26,7 @@ export default function OperatorSale() {
   const accounts = asList(accountsReq.data).filter(
     (a) => !/mbank|мбанк/i.test(a.name || ''),
   )
-  // Заявки на склад этого филиала (для встроенного виджета «Заявка на склад»).
-  const whReq = useFetch('/warehouse-orders/', { active: 1 })
-  const whOrders = asList(whReq.data)
 
-  const [tab, setTab] = useState('sale') // 'sale' | 'warehouse' — одно окно, две логики
   const [mode, setMode] = useState('DIRECT')
   const [clientCode, setClientCode] = useState('')
   const [weight, setWeight] = useState('')
@@ -163,7 +147,7 @@ export default function OperatorSale() {
       }
 
       const { data } = await api.post('/sales/', body)
-      setSuccess(`Продажа «${data.client_code}» на ${som(data.price_som)} добавлена.`)
+      setSuccess(`Продажа «${data.client_code}» на ${som(data.price_som)} добавлена. Заявка на склад создана.`)
 
       // Сброс под следующий ввод; счёт оставляем для скорости.
       setClientCode('')
@@ -201,19 +185,10 @@ export default function OperatorSale() {
       <div className="operator-card-head">
         <h2 className="card-title">Новая продажа</h2>
         <p className="muted">
-          {tab === 'sale'
-            ? <>Заполните данные продажи — она попадёт в Loko Express. Дата: сегодня, {dateRu(today())}.</>
-            : 'Соберите заявку из 1–5 кодов клиентов — складовщик увидит её сразу.'}
+          Заполните данные продажи — она попадёт в Loko Express. Дата: сегодня, {dateRu(today())}.
         </p>
       </div>
 
-      <div className="field">
-        <span className="field-label">Что оформляем</span>
-        <Segmented value={tab} onChange={setTab} options={TABS} />
-      </div>
-
-      {tab === 'sale' ? (
-      <>
       {error && <Alert kind="error">{error}</Alert>}
       {success && <Alert kind="success">{success}</Alert>}
 
@@ -373,27 +348,6 @@ export default function OperatorSale() {
             </Alert>
           )}
         </Modal>
-      )}
-      </>
-      ) : (
-      <>
-      <WarehouseOrderForm onCreated={() => whReq.reload()} />
-      {whOrders.length > 0 && (
-        <div style={{ marginTop: 16 }}>
-          <div className="card-title" style={{ fontSize: 15, marginBottom: 8 }}>Активные заявки филиала</div>
-          <div className="col" style={{ gap: 8 }}>
-            {whOrders.map((o) => (
-              <div key={o.id} className="wh-mini-row">
-                <div className="wh-codes">
-                  {(o.client_codes || []).map((c, i) => <span key={i} className="wh-code">{c}</span>)}
-                </div>
-                <Badge variant={WH_STATUS_VARIANT[o.status] || 'badge-manager'}>{o.status_display}</Badge>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-      </>
       )}
     </div>
   )
