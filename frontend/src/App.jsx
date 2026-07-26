@@ -14,7 +14,6 @@ import ClientPrices from './pages/ClientPrices'
 import OtherIncome from './pages/OtherIncome'
 import OperatorSale from './pages/OperatorSale'
 import OperatorMySales from './pages/OperatorMySales'
-import OperatorWarehouse from './pages/OperatorWarehouse'
 import WarehouseLayout from './components/WarehouseLayout'
 import WarehouseDashboard from './pages/WarehouseDashboard'
 import Expenses from './pages/Expenses'
@@ -61,7 +60,6 @@ function AppRoutes() {
         >
           <Route index element={<OperatorSale />} />
           <Route path="my-sales" element={<OperatorMySales />} />
-          <Route path="warehouse-order" element={<OperatorWarehouse />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
