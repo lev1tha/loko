@@ -82,11 +82,18 @@ class SaleViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         user = self.request.user
-        # Филиал: у оператора («Сотрудник») — его закреплённый филиал (подмена
-        # невозможна); у менеджера/админа — выбранный в форме. Если филиал не задан —
-        # подставляем филиал по умолчанию (Гульчинская), а не блокируем продажу.
+        # Филиал: у оператора («Сотрудник») — строго ЕГО закреплённый филиал (подмена
+        # невозможна, дефолтного фолбэка нет). Продажа записывается в тот филиал, к
+        # которому привязан сотрудник; филиал не назначен → это ошибка настройки, и
+        # мы блокируем с понятным сообщением, а не пишем молча «по умолчанию».
+        # У менеджера/админа — выбранный в форме, иначе филиал по умолчанию.
         if getattr(user, "is_operator", False):
-            branch = user.branch or Branch.resolve_default()
+            branch = user.branch
+            if branch is None:
+                raise serializers.ValidationError(
+                    {"branch": "Вам не назначен филиал. Обратитесь к администратору — "
+                               "он привяжет вас к филиалу в разделе «Пользователи»."}
+                )
         else:
             branch = serializer.validated_data.get("branch") or Branch.resolve_default()
         sale = serializer.save(created_by=user, branch=branch)

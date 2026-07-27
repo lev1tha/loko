@@ -101,6 +101,10 @@ export default function OperatorSale() {
     setError('')
     setSuccess('')
 
+    if (!userBranchName) {
+      setError('Вам не назначен филиал — обратитесь к администратору. Без филиала продажу добавить нельзя.')
+      return
+    }
     if (!clientCode.trim()) {
       setError('Укажите код клиента.')
       return
@@ -274,9 +278,18 @@ export default function OperatorSale() {
           )}
         </div>
 
-        <Field label="Филиал" hint="Продажа запишется в этот филиал">
-          <input className="input input-readonly" value={userBranchName || 'По умолчанию'} readOnly tabIndex={-1} />
-        </Field>
+        {userBranchName ? (
+          <Field label="Филиал" hint="Продажа запишется в филиал, к которому вы привязаны">
+            <input className="input input-readonly" value={userBranchName} readOnly tabIndex={-1} />
+          </Field>
+        ) : (
+          <div className="field">
+            <span className="field-label">Филиал</span>
+            <Alert kind="error">
+              Вам не назначен филиал. Обратитесь к администратору — без филиала продажу добавить нельзя.
+            </Alert>
+          </div>
+        )}
 
         <Field label="Счёт зачисления (нал/безнал)">
           <select
@@ -298,7 +311,7 @@ export default function OperatorSale() {
           <span className="operator-total-value">{som(total)}</span>
         </div>
 
-        <button className="btn btn-primary btn-block" disabled={saving} type="submit">
+        <button className="btn btn-primary btn-block" disabled={saving || !userBranchName} type="submit">
           <IconPlus size={18} /> {saving ? 'Добавление…' : 'Добавить продажу'}
         </button>
       </form>

@@ -3,7 +3,7 @@ from decimal import Decimal
 from django.contrib.auth import get_user_model
 from rest_framework.test import APITestCase
 
-from finance.models import Account, AppSettings
+from finance.models import Account, AppSettings, Branch
 from express.models import ClientPrice, Sale
 
 User = get_user_model()
@@ -113,3 +113,41 @@ class WeightClientPriceTests(APITestCase):
         self.assertEqual(r.data["price_som"], Decimal("1000.00"))
         # Оператору не раскрываем ставку за кг — только итог.
         self.assertNotIn("price_per_kg_usd", r.data)
+
+
+class OperatorSaleBranchTests(APITestCase):
+    """Продажа сотрудника пишется в ЕГО филиал — без «дефолтного» фолбэка."""
+
+    def setUp(self):
+        _settings()
+        self.acc = Account.objects.create(name="Нал-бр", kind="CASH", currency="KGS", module="EXPRESS")
+        # Филиал по умолчанию + рабочий филиал сотрудника (НЕ дефолтный).
+        self.default_branch = Branch.objects.create(name="Гульчинская", is_default=True)
+        self.staff_branch = Branch.objects.create(name="Раззакова", is_default=False)
+
+    def _sale_body(self, code):
+        return {
+            "amount_mode": "DIRECT", "client_code": code, "price_som": "5000",
+            "account": self.acc.id, "date": "2026-06-01",
+        }
+
+    def test_sale_filed_to_operator_branch_not_default(self):
+        op = User.objects.create_user(
+            "op_br", password="pass1234", role=User.Role.OPERATOR, branch=self.staff_branch
+        )
+        self.client.force_authenticate(op)
+        r = self.client.post("/api/sales/", self._sale_body("A1"), format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        sale = Sale.objects.get(client_code="A1")
+        # Ключевая проверка: филиал сотрудника, а НЕ филиал по умолчанию.
+        self.assertEqual(sale.branch_id, self.staff_branch.id)
+        self.assertNotEqual(sale.branch_id, self.default_branch.id)
+
+    def test_operator_without_branch_is_blocked(self):
+        op = User.objects.create_user("op_nb", password="pass1234", role=User.Role.OPERATOR)
+        self.client.force_authenticate(op)
+        r = self.client.post("/api/sales/", self._sale_body("B1"), format="json")
+        # Нет назначенного филиала → 400, продажа не создаётся (не пишем в дефолт).
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("branch", r.data)
+        self.assertFalse(Sale.objects.filter(client_code="B1").exists())
