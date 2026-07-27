@@ -26,3 +26,8 @@ frontend/.vite/
 .idea/
 .vscode/
 *.log
+
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example
