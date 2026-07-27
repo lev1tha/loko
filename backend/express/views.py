@@ -491,10 +491,16 @@ class WarehouseOrderViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         user = self.request.user
-        # Филиал заявки: у оператора — его филиал; у менеджера/админа — выбранный,
-        # иначе филиал по умолчанию (как у продаж).
+        # Филиал заявки: у складовщика/оператора — строго ЕГО филиал (без дефолтного
+        # фолбэка, как и у продаж сотрудника). Не назначен → понятная ошибка вместо
+        # тихой записи «в дефолт». У менеджера/админа — выбранный, иначе по умолчанию.
         if getattr(user, "is_operator", False) or getattr(user, "is_warehouse", False):
-            branch = user.branch or Branch.resolve_default()
+            branch = user.branch
+            if branch is None:
+                raise serializers.ValidationError(
+                    {"branch": "Вам не назначен филиал. Обратитесь к администратору — "
+                               "он привяжет вас к филиалу в разделе «Пользователи»."}
+                )
         else:
             branch = serializer.validated_data.get("branch") or user.branch or Branch.resolve_default()
         serializer.save(created_by=user, branch=branch, status=WarehouseOrder.Status.NEW)

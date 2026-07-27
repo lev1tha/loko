@@ -62,9 +62,10 @@ class UserCreateSerializer(serializers.ModelSerializer):
                 )
         else:
             attrs["module"] = None
-        # Филиал имеет смысл только для «Сотрудника» (авто-тег его продаж Express).
-        # У остальных ролей — очищаем, чтобы не оставлять «висящей» привязки.
-        if role != User.Role.OPERATOR:
+        # Филиал нужен «Сотруднику» (авто-тег его продаж Express) и «Складовщику»
+        # (он видит и ведёт заявки только своего филиала). У остальных ролей —
+        # очищаем, чтобы не оставлять «висящей» привязки.
+        if role not in (User.Role.OPERATOR, User.Role.WAREHOUSE):
             attrs["branch"] = None
         return attrs
 

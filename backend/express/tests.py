@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model
 from rest_framework.test import APITestCase
 
 from finance.models import Account, AppSettings, Branch
-from express.models import ClientPrice, Sale
+from express.models import ClientPrice, Sale, WarehouseOrder
 
 User = get_user_model()
 
@@ -151,3 +151,75 @@ class OperatorSaleBranchTests(APITestCase):
         self.assertEqual(r.status_code, 400)
         self.assertIn("branch", r.data)
         self.assertFalse(Sale.objects.filter(client_code="B1").exists())
+
+    def test_operator_sale_creates_warehouse_order_in_same_branch(self):
+        # Связка «Сотрудник → Склад»: продажа авто-создаёт заявку в филиал сотрудника,
+        # которую увидит складовщик того же филиала (см. WarehouseBranchScopeTests).
+        op = User.objects.create_user(
+            "op_wh", password="pass1234", role=User.Role.OPERATOR, branch=self.staff_branch
+        )
+        self.client.force_authenticate(op)
+        r = self.client.post("/api/sales/", self._sale_body("C1"), format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        # Продажа создала ровно одну заявку — она в филиале сотрудника.
+        wo = WarehouseOrder.objects.get()
+        self.assertEqual(wo.branch_id, self.staff_branch.id)
+        self.assertEqual(wo.client_codes, ["C1"])
+
+
+class WarehouseBranchScopeTests(APITestCase):
+    """Складовщик видит и создаёт заявки ТОЛЬКО своего филиала (без филиала — ничего).
+
+    Зеркало правил сотрудника: у обоих филиал — жёсткая привязка, без «дефолта».
+    """
+
+    def setUp(self):
+        self.branch_a = Branch.objects.create(name="Филиал A", is_default=True)
+        self.branch_b = Branch.objects.create(name="Филиал B", is_default=False)
+        self.wh_a = User.objects.create_user(
+            "wh_a", password="pass1234", role=User.Role.WAREHOUSE, branch=self.branch_a
+        )
+        # Заявки в обоих филиалах — складовщик A должен видеть только «свою».
+        self.order_a = WarehouseOrder.objects.create(
+            branch=self.branch_a, created_by=self.wh_a, client_codes=["AAA"],
+            status=WarehouseOrder.Status.NEW,
+        )
+        self.order_b = WarehouseOrder.objects.create(
+            branch=self.branch_b, created_by=self.wh_a, client_codes=["BBB"],
+            status=WarehouseOrder.Status.NEW,
+        )
+
+    def _ids(self, resp):
+        results = resp.data.get("results", resp.data)
+        return {o["id"] for o in results}
+
+    def test_warehouse_sees_only_own_branch(self):
+        self.client.force_authenticate(self.wh_a)
+        r = self.client.get("/api/warehouse-orders/")
+        self.assertEqual(r.status_code, 200)
+        ids = self._ids(r)
+        self.assertIn(self.order_a.id, ids)
+        self.assertNotIn(self.order_b.id, ids)  # чужой филиал не виден
+
+    def test_warehouse_without_branch_sees_nothing(self):
+        wh_none = User.objects.create_user("wh_none", password="pass1234", role=User.Role.WAREHOUSE)
+        self.client.force_authenticate(wh_none)
+        r = self.client.get("/api/warehouse-orders/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(len(r.data.get("results", r.data)), 0)
+
+    def test_warehouse_create_files_to_own_branch(self):
+        self.client.force_authenticate(self.wh_a)
+        r = self.client.post("/api/warehouse-orders/", {"client_codes": ["ZZZ"]}, format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        # Филиал берётся с сервера (филиал складовщика), а не из тела запроса.
+        self.assertEqual(r.data["branch"], self.branch_a.id)
+
+    def test_warehouse_without_branch_cannot_create(self):
+        wh_none = User.objects.create_user("wh_none2", password="pass1234", role=User.Role.WAREHOUSE)
+        self.client.force_authenticate(wh_none)
+        before = WarehouseOrder.objects.count()
+        r = self.client.post("/api/warehouse-orders/", {"client_codes": ["QQQ"]}, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("branch", r.data)
+        self.assertEqual(WarehouseOrder.objects.count(), before)  # ничего не создано

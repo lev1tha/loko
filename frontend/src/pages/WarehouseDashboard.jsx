@@ -23,7 +23,10 @@ function shortBranch(name) {
 // Доска склада: складовщик ведёт заявки своего филиала по статусам; менеджер/админ
 // видят все филиалы, создают заявки и «выдают». Авто-обновление (polling ~7с).
 export default function WarehouseDashboard() {
-  const { isWarehouse } = useAuth()
+  const { isWarehouse, userBranchName } = useAuth()
+  // Складовщик без назначенного филиала не видит и не ведёт заявки: доска на
+  // сервере фильтруется по его филиалу, поэтому без филиала она всегда пуста.
+  const noBranch = isWarehouse && !userBranchName
   // Доска — отдельное приложение складовщика: он ведёт весь цикл сам
   // (создать → в поиск → готова → выдать клиенту).
   const canCreate = true
@@ -69,6 +72,22 @@ export default function WarehouseDashboard() {
 
   const byStatus = (k) => orders.filter((o) => o.status === k)
   const readyCount = byStatus('READY').length
+
+  // Складовщику без филиала показываем понятную причину пустой доски, а не молча
+  // пустые колонки (симметрично странице продажи сотрудника).
+  if (noBranch) {
+    return (
+      <div className="wh-page">
+        <div className="wh-head">
+          <h2 className="card-title">Склад · сборка заказов</h2>
+        </div>
+        <Alert kind="error">
+          Вам не назначен филиал. Обратитесь к администратору — он привяжет вас к филиалу
+          в разделе «Пользователи». Без филиала заявки склада не отображаются.
+        </Alert>
+      </div>
+    )
+  }
 
   return (
     <div className="wh-page">
