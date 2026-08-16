@@ -527,6 +527,7 @@ textarea.input { height: auto; padding: 10px 14px; resize: vertical; min-height:
 .wh-col-new { border-top: 4px solid #f59e0b; }
 .wh-col-in_progress { border-top: 4px solid #3b82f6; }
 .wh-col-ready { border-top: 4px solid #10b981; background: #f0fdf4; }
+.wh-col-not_found { border-top: 4px solid #ef4444; background: #fef2f2; }
 .wh-col-head { display: flex; justify-content: space-between; align-items: center; }
 .wh-col-label { font-weight: 700; font-size: 15px; }
 .wh-col-count { background: #111827; color: #fff; border-radius: 999px; min-width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; padding: 0 8px; font-size: 13px; font-weight: 700; }
@@ -536,6 +537,16 @@ textarea.input { height: auto; padding: 10px 14px; resize: vertical; min-height:
 .wh-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 12px; box-shadow: 0 1px 2px rgba(0, 0, 0, .04); }
 .wh-card-new { border-left: 3px solid #f59e0b; }
 .wh-card-ready { border-left: 3px solid #10b981; }
+.wh-card-not_found { border-left: 3px solid #ef4444; }
+
+/* Чип статуса заявки склада — для «Мои продажи» сотрудника (итог заявки). */
+.wh-status { display: inline-block; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
+.wh-status-new { background: #fef3c7; color: #92400e; }
+.wh-status-in_progress { background: #dbeafe; color: #1e40af; }
+.wh-status-ready { background: #d1fae5; color: #065f46; }
+.wh-status-not_found { background: #fee2e2; color: #991b1b; }
+.wh-status-issued { background: #dcfce7; color: #166534; }
+.wh-status-cancelled { background: #f3f4f6; color: #6b7280; }
 .wh-card-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .wh-card-id { font-weight: 700; color: #6b7280; font-size: 13px; }
 .wh-card-branch { font-size: 11px; color: #6b7280; background: #f3f4f6; border-radius: 6px; padding: 2px 6px; }
@@ -643,6 +654,81 @@ textarea.input { height: auto; padding: 10px 14px; resize: vertical; min-height:
 .operator-sales-code { font-weight: 600; color: var(--ink); }
 .operator-sales-meta { font-size: 12px; color: var(--muted); }
 .operator-sales-sum { font-weight: 600; color: var(--ink); white-space: nowrap; }
+
+/* Ввод до 5 кодов клиента (оператор «Новая продажа») — короткие инпуты в столбик. */
+.operator-code-rows { display: flex; flex-direction: column; gap: 8px; }
+.operator-code-row { display: flex; align-items: center; gap: 8px; }
+.operator-code-input { max-width: 280px; }
+.operator-code-remove {
+  flex: none; width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--hairline);
+  background: #fff; color: #9ca3af; font-size: 14px; cursor: pointer; line-height: 1;
+}
+.operator-code-remove:hover { color: #b91c1c; border-color: #e5b4b4; background: #fef2f2; }
+.operator-add-code {
+  align-self: flex-start; margin-top: 8px; background: none; border: 0; padding: 4px 2px;
+  color: var(--accent, #2563eb); font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.operator-add-code:hover { text-decoration: underline; }
+
+/* Живой список своих кодов на «Новой продаже» (цена появляется при оприходовании). */
+.operator-mycodes { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--hairline); }
+.operator-mycodes-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
+
+/* Подсветка строк по статусу склада (оператор «Мои продажи» + позиции доски).
+   🟢 найдено/выдано · 🔴 не найдено · вечерний допоиск · ⚪ в поиске. */
+.wh-row-found, .wh-row-delivered { background: #E8F5E9; }
+.wh-row-not_found { background: #F1A8A8; }
+.wh-row-evening { background: #FBE9D0; }
+.wh-row-in_search { background: #F6F8FA; }
+.operator-sales-row.wh-row-found,
+.operator-sales-row.wh-row-delivered,
+.operator-sales-row.wh-row-not_found,
+.operator-sales-row.wh-row-evening,
+.operator-sales-row.wh-row-in_search {
+  border-top: 0; padding: 11px 12px; margin: 4px 0; border-radius: 10px; align-items: center;
+}
+.wh-remove {
+  flex: none; width: 30px; height: 30px; border-radius: 8px; border: 1px solid #d98b8b;
+  background: #fff; color: #b91c1c; font-size: 15px; font-weight: 700; cursor: pointer;
+}
+.wh-remove:hover:not(:disabled) { background: #fee2e2; }
+.wh-remove:disabled { opacity: .5; cursor: default; }
+
+/* Доска склада — вкладки + карточки заявок + позиции. */
+.wh-tabs { display: flex; gap: 6px; margin: 4px 0 16px; border-bottom: 1px solid var(--hairline); }
+.wh-tab {
+  appearance: none; background: none; border: 0; border-bottom: 2px solid transparent;
+  padding: 9px 12px; font-size: 14px; font-weight: 600; color: var(--muted); cursor: pointer;
+  display: inline-flex; align-items: center; gap: 8px; margin-bottom: -1px;
+}
+.wh-tab:hover { color: var(--ink); }
+.wh-tab.active { color: var(--ink); border-bottom-color: #111827; }
+.wh-tab-badge { background: #ef4444; color: #fff; border-radius: 999px; min-width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; padding: 0 6px; font-size: 12px; font-weight: 700; }
+.wh-empty-box { color: var(--muted); text-align: center; padding: 40px 0; background: #f8fafc; border: 1px dashed #e5e7eb; border-radius: 12px; }
+.wh-orders { display: flex; flex-direction: column; gap: 14px; }
+.wh-order { padding: 14px 16px; }
+.wh-order-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.wh-order-id { font-weight: 700; color: #6b7280; font-size: 14px; }
+.wh-items { display: flex; flex-direction: column; gap: 6px; }
+.wh-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 9px 11px; border-radius: 9px; border: 1px solid transparent;
+}
+.wh-item.wh-row-in_search { border-color: #e5e7eb; }
+.wh-item.wh-row-not_found { border-color: #e59a9a; }
+.wh-item-main { min-width: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.wh-code { font-family: ui-monospace, Menlo, monospace; font-weight: 700; color: var(--ink); }
+.wh-item-branch { font-size: 11px; color: #6b7280; background: #f3f4f6; border-radius: 6px; padding: 2px 6px; }
+.wh-item-reason { font-size: 12px; color: #7f1d1d; }
+.wh-item-actions { display: flex; gap: 6px; flex: none; }
+.wh-item-fin { display: flex; align-items: baseline; gap: 8px; flex: none; }
+.wh-item-fin strong { color: var(--ink); white-space: nowrap; }
+
+/* Чипы статуса позиции (в дополнение к статусам заявки выше). */
+.wh-status-in_search { background: #e5e7eb; color: #374151; }
+.wh-status-found { background: #C8E6C9; color: #1b5e20; }
+.wh-status-delivered { background: #c8e6c9; color: #166534; }
+.wh-status-evening { background: #fde4c8; color: #9a4a00; }
 
 /* Директорские отчёты — центрированная колонка (как контент у админа), а не
    прижатая к левому краю на всю ширину экрана. */

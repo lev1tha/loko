@@ -1,6 +1,12 @@
+from decimal import Decimal
+
 from rest_framework import serializers
 
-from .models import ClientPrice, Sale, WarehouseOrder
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import extend_schema_field
+
+from finance.models import Account
+from .models import ClientPrice, Sale, WarehouseItem, WarehouseOrder
 
 
 class SaleSerializer(serializers.ModelSerializer):
@@ -113,31 +119,18 @@ class SaleSerializer(serializers.ModelSerializer):
 
 
 class OperatorSaleSerializer(SaleSerializer):
-    """Сериализатор для роли «Сотрудник».
+    """Узкий сериализатор продаж для не-финансовых ролей (без себестоимости/маржи).
 
-    Без финансовых полей (себестоимость, маржа, ставки, дебиторка) — ни в ответе,
-    ни на запись. Оператор их не видит (даже в devtools / сыром ответе на create)
-    и не может задать через тело запроса. Себестоимость всегда считается
-    динамически на бэкенде (cost_is_manual недоступен).
+    Оставлен для обратной совместимости ``SaleViewSet``. В двухэтапном учёте
+    оператор продажи напрямую НЕ создаёт — он формирует складскую заявку
+    (``WarehouseOrder`` + ``WarehouseItem``), а продажа рождается при оприходовании.
     """
 
     class Meta(SaleSerializer.Meta):
         fields = (
-            "id",
-            "client_code",
-            "amount_mode",
-            "amount_mode_display",
-            "weight_kg",
-            "places",
-            "account",
-            "account_name",
-            "branch_name",
-            "is_cash",
-            "price_som",
-            "paid_som",
-            "date",
-            "payment_date",
-            "created_at",
+            "id", "client_code", "amount_mode", "amount_mode_display",
+            "weight_kg", "places", "account", "account_name", "branch_name",
+            "is_cash", "price_som", "paid_som", "date", "payment_date", "created_at",
         )
         read_only_fields = ("created_at",)
         extra_kwargs = {
@@ -166,27 +159,55 @@ class ClientPriceSerializer(serializers.ModelSerializer):
         return value
 
 
+class WarehouseItemSerializer(serializers.ModelSerializer):
+    """Позиция заявки — один код с его статусом (для доски склада и «Мои продажи»).
+
+    ``price_som`` берётся с созданной при оприходовании продажи (иначе ``None``) —
+    финансовые цифры показываем только когда позиция реально найдена (FOUND)."""
+
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    order_id = serializers.IntegerField(source="order.id", read_only=True)
+    branch_name = serializers.CharField(source="order.branch.name", read_only=True, default=None)
+    created_by_name = serializers.CharField(source="order.created_by.username", read_only=True, default=None)
+    price_som = serializers.SerializerMethodField()
+
+    class Meta:
+        model = WarehouseItem
+        fields = (
+            "id", "order_id", "client_code", "status", "status_display",
+            "weight_kg", "price_som", "reason", "branch_name", "created_by_name",
+            "created_at", "updated_at",
+        )
+        read_only_fields = fields
+
+    @extend_schema_field(OpenApiTypes.DECIMAL)
+    def get_price_som(self, obj):
+        # Строкой — как остальные денежные поля DRF (coerce_to_string), None у ненайденных.
+        return str(obj.sale.price_som) if obj.sale_id else None
+
+
 class WarehouseOrderSerializer(serializers.ModelSerializer):
-    """Заявка на сборку (склад). Создаёт оператор/менеджер; статус меняется через
-    отдельный action (status), поэтому здесь он read-only."""
+    """Заявка-«чек» на сборку. Оператор/менеджер создаёт её с кодами (без денег);
+    позиции (``items``) ведёт складовщик пошту́чно. Статус позиции — на позиции."""
 
     branch_name = serializers.CharField(source="branch.name", read_only=True, default=None)
     created_by_name = serializers.CharField(source="created_by.username", read_only=True, default=None)
     assigned_to_name = serializers.CharField(source="assigned_to.username", read_only=True, default=None)
     status_display = serializers.CharField(source="get_status_display", read_only=True)
+    items = WarehouseItemSerializer(many=True, read_only=True)
 
     class Meta:
         model = WarehouseOrder
         fields = (
             "id", "branch", "branch_name", "created_by", "created_by_name",
             "assigned_to", "assigned_to_name", "status", "status_display",
-            "client_codes", "comment", "created_at", "updated_at",
+            "client_codes", "items", "comment", "created_at", "updated_at",
         )
         read_only_fields = (
             "created_by", "assigned_to", "status", "created_at", "updated_at",
         )
         extra_kwargs = {
-            # Филиал: у оператора/менеджера подставляется на сервере (perform_create).
+            # Филиал: у оператора/складовщика подставляется на сервере (perform_create).
             "branch": {"required": False},
         }
 
@@ -206,3 +227,26 @@ class WarehouseStatusSerializer(serializers.Serializer):
 
     status = serializers.ChoiceField(choices=WarehouseOrder.Status.choices)
     comment = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class WarehouseReceiveSerializer(serializers.Serializer):
+    """Оприходование позиции складовщиком: фактический вес + счёт зачисления."""
+
+    weight_kg = serializers.DecimalField(
+        max_digits=10, decimal_places=3, min_value=Decimal("0.001"),
+    )
+    account = serializers.PrimaryKeyRelatedField(
+        queryset=Account.objects.filter(module="EXPRESS", currency="KGS", is_active=True),
+    )
+
+
+class WarehouseNotFoundSerializer(serializers.Serializer):
+    """Позиция не найдена — обязательна причина (куда смотрели / чего нет)."""
+
+    reason = serializers.CharField()
+
+    def validate_reason(self, value):
+        value = (value or "").strip()
+        if not value:
+            raise serializers.ValidationError("Укажите причину — что не найдено.")
+        return value

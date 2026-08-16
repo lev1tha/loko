@@ -1,16 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import api, { errorMessage } from '../api/client'
 import { useFetch, asList } from '../lib/hooks'
 import { useAuth } from '../auth/AuthContext'
-import { Alert, Spinner } from '../components/ui'
-import WarehouseOrderForm from '../components/WarehouseOrderForm'
+import { som, kg } from '../lib/format'
+import { Alert, Field, Modal, Spinner } from '../components/ui'
 
-// Колонки канбан-доски (активные статусы). ISSUED/CANCELLED скрыты (active=1).
-const COLUMNS = [
-  { key: 'NEW', label: 'Новые', sub: 'в очереди' },
-  { key: 'IN_PROGRESS', label: 'В поиске', sub: 'собираются' },
-  { key: 'READY', label: 'Готовы к выдаче', sub: 'ждут клиента' },
-]
 const POLL_MS = 7000
 
 // Короткое имя филиала для карточки: "Loko Express — Гульчинская улица, 13/1" → "Гульчинская, 13/1".
@@ -20,49 +14,64 @@ function shortBranch(name) {
   return tail.replace('улица,', '').replace(/\s+/g, ' ').trim()
 }
 
-// Доска склада: складовщик ведёт заявки своего филиала по статусам; менеджер/админ
-// видят все филиалы, создают заявки и «выдают». Авто-обновление (polling ~7с).
+const isFound = (s) => s === 'FOUND' || s === 'DELIVERED'
+
+// Доска склада (двухэтапный учёт). Складовщик оприходует КАЖДЫЙ код пошту́чно:
+// «Оприходовать» (вес → создаётся продажа) или «Не найдено» (причина). Вкладка
+// «Вечерний допоиск» — коды, от которых оператор отказался днём (ревизия смены).
 export default function WarehouseDashboard() {
   const { isWarehouse, userBranchName } = useAuth()
-  // Складовщик без назначенного филиала не видит и не ведёт заявки: доска на
-  // сервере фильтруется по его филиалу, поэтому без филиала она всегда пуста.
   const noBranch = isWarehouse && !userBranchName
-  // Доска — отдельное приложение складовщика: он ведёт весь цикл сам
-  // (создать → в поиск → готова → выдать клиенту).
-  const canCreate = true
-  const canIssue = true
 
+  const [tab, setTab] = useState('day')
   const [search, setSearch] = useState('')
-  const [showCreate, setShowCreate] = useState(false)
-  const [busyId, setBusyId] = useState(null)
   const [error, setError] = useState('')
+  const [busyId, setBusyId] = useState(null)
 
-  const params = { active: 1, ...(search.trim() ? { search: search.trim() } : {}) }
-  const req = useFetch('/warehouse-orders/', params)
-  const branchesReq = useFetch('/branches/', { active: 1 })
-  const orders = asList(req.data)
+  // Модалка оприходования: позиция + вес + счёт зачисления.
+  const [receiveItem, setReceiveItem] = useState(null)
+  const [weight, setWeight] = useState('')
+  const [accountId, setAccountId] = useState('')
 
-  // Авто-обновление (polling) — near-real-time без WebSocket.
+  const dayParams = useMemo(
+    () => ({ active_items: 1, ...(search.trim() ? { search: search.trim() } : {}) }),
+    [search],
+  )
+  const dayReq = useFetch('/warehouse-orders/', dayParams)
+  const eveningReq = useFetch('/warehouse-items/', { status: 'EVENING' })
+  const accounts = asList(useFetch('/warehouse-items/accounts/').data)
+
+  const orders = asList(dayReq.data)
+  const evening = asList(eveningReq.data)
+
+  // Авто-обновление обеих лент (near-real-time без WebSocket).
   useEffect(() => {
-    const t = setInterval(() => req.reload(), POLL_MS)
+    const t = setInterval(() => { dayReq.reload(); eveningReq.reload() }, POLL_MS)
     return () => clearInterval(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [req.reload])
+  }, [dayReq.reload, eveningReq.reload])
 
-  async function changeStatus(order, status) {
-    let comment
-    if (status === 'CANCELLED') {
-      comment = window.prompt('Причина отмены (обязательно):', '')
-      if (!comment || !comment.trim()) return
-    }
-    setBusyId(order.id)
+  function openReceive(item) {
+    setError('')
+    setReceiveItem(item)
+    setWeight('')
+    const def = accounts.find((a) => a.kind === 'CASH') || accounts[0]
+    setAccountId(def ? String(def.id) : '')
+  }
+
+  async function submitReceive(e) {
+    e?.preventDefault?.()
+    if (!receiveItem) return
+    if (!(parseFloat(weight) > 0)) { setError('Укажите вес больше нуля.'); return }
+    if (!accountId) { setError('Выберите счёт зачисления.'); return }
+    setBusyId(receiveItem.id)
     setError('')
     try {
-      await api.patch(`/warehouse-orders/${order.id}/status/`, {
-        status,
-        ...(comment ? { comment: comment.trim() } : {}),
+      await api.post(`/warehouse-items/${receiveItem.id}/receive/`, {
+        weight_kg: weight, account: accountId,
       })
-      req.reload()
+      setReceiveItem(null)
+      dayReq.reload(); eveningReq.reload()
     } catch (err) {
       setError(errorMessage(err))
     } finally {
@@ -70,17 +79,25 @@ export default function WarehouseDashboard() {
     }
   }
 
-  const byStatus = (k) => orders.filter((o) => o.status === k)
-  const readyCount = byStatus('READY').length
+  async function markNotFound(item) {
+    const reason = window.prompt('Что не найдено / где искали (обязательно):', '')
+    if (!reason || !reason.trim()) return
+    setBusyId(item.id)
+    setError('')
+    try {
+      await api.post(`/warehouse-items/${item.id}/not-found/`, { reason: reason.trim() })
+      dayReq.reload(); eveningReq.reload()
+    } catch (err) {
+      setError(errorMessage(err))
+    } finally {
+      setBusyId(null)
+    }
+  }
 
-  // Складовщику без филиала показываем понятную причину пустой доски, а не молча
-  // пустые колонки (симметрично странице продажи сотрудника).
   if (noBranch) {
     return (
       <div className="wh-page">
-        <div className="wh-head">
-          <h2 className="card-title">Склад · сборка заказов</h2>
-        </div>
+        <div className="wh-head"><h2 className="card-title">Склад · сборка заказов</h2></div>
         <Alert kind="error">
           Вам не назначен филиал. Обратитесь к администратору — он привяжет вас к филиалу
           в разделе «Пользователи». Без филиала заявки склада не отображаются.
@@ -88,6 +105,8 @@ export default function WarehouseDashboard() {
       </div>
     )
   }
+
+  const itemProps = { busyId, onReceive: openReceive, onNotFound: markNotFound }
 
   return (
     <div className="wh-page">
@@ -98,7 +117,6 @@ export default function WarehouseDashboard() {
           <h2 className="card-title">Склад · сборка заказов</h2>
           <p className="muted" style={{ margin: '2px 0 0' }}>
             {isWarehouse ? 'Заявки вашего филиала' : 'Все филиалы'} · обновляется автоматически
-            {readyCount > 0 && <> · <strong className="pos">{readyCount} готово к выдаче</strong></>}
           </p>
         </div>
         <div className="row gap-sm wh-head-actions">
@@ -109,104 +127,147 @@ export default function WarehouseDashboard() {
             onChange={(e) => setSearch(e.target.value)}
             style={{ maxWidth: 220 }}
           />
-          {canCreate && (
-            <button className="btn btn-primary" onClick={() => setShowCreate((v) => !v)}>
-              {showCreate ? 'Закрыть' : '+ Новая заявка'}
-            </button>
-          )}
         </div>
       </div>
 
-      {canCreate && showCreate && (
-        <div className="card" style={{ marginBottom: 16, maxWidth: 520 }}>
-          <WarehouseOrderForm
-            branches={asList(branchesReq.data)}
-            onCreated={() => { setShowCreate(false); req.reload() }}
-          />
+      <div className="wh-tabs">
+        <button className={`wh-tab ${tab === 'day' ? 'active' : ''}`} onClick={() => setTab('day')}>
+          Дневная сборка
+        </button>
+        <button className={`wh-tab ${tab === 'evening' ? 'active' : ''}`} onClick={() => setTab('evening')}>
+          Вечерний допоиск
+          {evening.length > 0 && <span className="wh-tab-badge">{evening.length}</span>}
+        </button>
+      </div>
+
+      {tab === 'day' ? (
+        dayReq.loading && !orders.length ? (
+          <Spinner full />
+        ) : !orders.length ? (
+          <div className="wh-empty-box">Нет заявок в работе — всё оприходовано.</div>
+        ) : (
+          <div className="wh-orders">
+            {orders.map((o) => (
+              <OrderCard key={o.id} order={o} showBranch={!isWarehouse} {...itemProps} />
+            ))}
+          </div>
+        )
+      ) : eveningReq.loading && !evening.length ? (
+        <Spinner full />
+      ) : !evening.length ? (
+        <div className="wh-empty-box">Вечерний допоиск пуст — отказов нет.</div>
+      ) : (
+        <div className="card wh-order">
+          <div className="wh-order-head">
+            <strong>Вечерний допоиск / ревизия</strong>
+            <span className="muted">коды, от которых отказались днём — перепроверьте</span>
+          </div>
+          <div className="wh-items">
+            {evening.map((it) => (
+              <ItemRow key={it.id} item={it} showBranch={!isWarehouse} {...itemProps} />
+            ))}
+          </div>
         </div>
       )}
 
-      {req.loading && !orders.length ? (
-        <Spinner full />
-      ) : (
-        <div className="wh-board">
-          {COLUMNS.map((col) => {
-            const items = byStatus(col.key)
-            return (
-              <section key={col.key} className={`wh-col wh-col-${col.key.toLowerCase()}`}>
-                <header className="wh-col-head">
-                  <span className="wh-col-label">{col.label}</span>
-                  <span className="wh-col-count">{items.length}</span>
-                </header>
-                <div className="wh-col-sub">{col.sub}</div>
-                <div className="wh-col-body">
-                  {items.length === 0 ? (
-                    <div className="wh-empty">пусто</div>
-                  ) : (
-                    items.map((o) => (
-                      <WhCard
-                        key={o.id}
-                        order={o}
-                        busy={busyId === o.id}
-                        onChange={changeStatus}
-                        canIssue={canIssue}
-                        showBranch={!isWarehouse}
-                      />
-                    ))
-                  )}
-                </div>
-              </section>
-            )
-          })}
-        </div>
+      {receiveItem && (
+        <Modal
+          title={`Оприходовать · ${receiveItem.client_code}`}
+          onClose={() => setReceiveItem(null)}
+          footer={
+            <>
+              <button className="btn btn-secondary" onClick={() => setReceiveItem(null)}>Отмена</button>
+              <button className="btn btn-primary" disabled={busyId === receiveItem.id} onClick={submitReceive}>
+                {busyId === receiveItem.id ? 'Сохранение…' : 'Оприходовать'}
+              </button>
+            </>
+          }
+        >
+          <p className="caption" style={{ margin: 0, lineHeight: 1.5 }}>
+            Введите фактический вес — сумма посчитается по тарифу и создастся продажа.
+          </p>
+          <Field label="Фактический вес, кг">
+            <input
+              className="input" type="number" step="0.001" min="0"
+              value={weight} onChange={(e) => setWeight(e.target.value)}
+              placeholder="5" autoFocus
+            />
+          </Field>
+          <Field label="Счёт зачисления (нал/безнал)">
+            <select className="select" value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+              {accounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name} ({a.kind === 'CASH' ? 'наличные' : 'безнал'})
+                </option>
+              ))}
+            </select>
+          </Field>
+        </Modal>
       )}
     </div>
   )
 }
 
-function WhCard({ order, busy, onChange, canIssue, showBranch }) {
-  const codes = order.client_codes || []
+// Карточка заявки-«чека»: коды одного клиента с их статусами и действиями.
+function OrderCard({ order, showBranch, ...itemProps }) {
+  const items = order.items || []
   return (
-    <article className={`wh-card wh-card-${order.status.toLowerCase()}`}>
-      <div className="wh-card-top">
-        <span className="wh-card-id">#{order.id}</span>
-        {showBranch && order.branch_name && <span className="wh-card-branch">{shortBranch(order.branch_name)}</span>}
+    <div className="card wh-order">
+      <div className="wh-order-head">
+        <span className="wh-order-id">#{order.id}</span>
+        {showBranch && order.branch_name && (
+          <span className="wh-item-branch">{shortBranch(order.branch_name)}</span>
+        )}
+        {order.created_by_name && <span className="muted">🧑 {order.created_by_name}</span>}
       </div>
-      <div className="wh-codes">
-        {codes.map((c, i) => <span key={i} className="wh-code">{c}</span>)}
+      <div className="wh-items">
+        {items.map((it) => (
+          <ItemRow key={it.id} item={it} showBranch={false} {...itemProps} />
+        ))}
       </div>
-      {order.comment && <div className="wh-comment">💬 {order.comment}</div>}
-      {order.assigned_to_name && <div className="wh-assigned">🧑‍🔧 {order.assigned_to_name}</div>}
+    </div>
+  )
+}
 
-      <div className="wh-actions">
-        {order.status === 'NEW' && (
-          <button className="btn btn-primary btn-block" disabled={busy} onClick={() => onChange(order, 'IN_PROGRESS')}>
-            Взять в поиск
-          </button>
+// Строка позиции: код + статус + действия (оприходовать / не найдено) либо сумма.
+function ItemRow({ item, showBranch, busyId, onReceive, onNotFound }) {
+  const found = isFound(item.status)
+  return (
+    <div className={`wh-item wh-row-${item.status.toLowerCase()}`}>
+      <div className="wh-item-main">
+        <span className="wh-code">{item.client_code}</span>
+        <span className={`wh-status wh-status-${item.status.toLowerCase()}`}>{item.status_display}</span>
+        {showBranch && item.branch_name && (
+          <span className="wh-item-branch">{shortBranch(item.branch_name)}</span>
         )}
-        {order.status === 'IN_PROGRESS' && (
-          <>
-            <button className="btn btn-primary btn-block wh-btn-ready" disabled={busy} onClick={() => onChange(order, 'READY')}>
-              Готова к выдаче
-            </button>
-            <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => onChange(order, 'CANCELLED')}>
-              Отмена
-            </button>
-          </>
-        )}
-        {order.status === 'READY' && (
-          <>
-            {canIssue && (
-              <button className="btn btn-primary btn-block" disabled={busy} onClick={() => onChange(order, 'ISSUED')}>
-                Выдать клиенту
-              </button>
-            )}
-            <button className="btn btn-ghost btn-sm" disabled={busy} onClick={() => onChange(order, 'CANCELLED')}>
-              Отмена
-            </button>
-          </>
+        {item.status === 'NOT_FOUND' && item.reason && (
+          <span className="wh-item-reason">💬 {item.reason}</span>
         )}
       </div>
-    </article>
+
+      {found ? (
+        <div className="wh-item-fin">
+          {item.weight_kg && <span className="muted">{kg(item.weight_kg)}</span>}
+          <strong>{som(item.price_som)}</strong>
+        </div>
+      ) : (
+        <div className="wh-item-actions">
+          <button
+            className="btn btn-primary btn-sm"
+            disabled={busyId === item.id}
+            onClick={() => onReceive(item)}
+          >
+            Оприходовать
+          </button>
+          <button
+            className="btn btn-ghost btn-sm"
+            disabled={busyId === item.id}
+            onClick={() => onNotFound(item)}
+          >
+            Не найдено
+          </button>
+        </div>
+      )}
+    </div>
   )
 }

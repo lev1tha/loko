@@ -106,65 +106,57 @@ class WeightClientPriceTests(APITestCase):
         self.assertEqual(s.price_som, Decimal("1080.00"))  # 4 × 270
 
     def test_quote_applies_client_price(self):
-        op = User.objects.create_user("op_q", password="pass1234", role=User.Role.OPERATOR)
-        self.client.force_authenticate(op)
+        # Quote — теперь только кассир/админ (оператор со SaleViewSet снят).
+        mgr = User.objects.create_user("mgr_q", password="pass1234", role=User.Role.MANAGER)
+        self.client.force_authenticate(mgr)
         r = self.client.post("/api/sales/quote/", {"weight_kg": "4", "client_code": "VIP"}, format="json")
         self.assertEqual(r.status_code, 200)
-        self.assertEqual(r.data["price_som"], Decimal("1000.00"))
-        # Оператору не раскрываем ставку за кг — только итог.
-        self.assertNotIn("price_per_kg_usd", r.data)
+        self.assertEqual(r.data["price_som"], Decimal("1000.00"))  # 4 × 250 (спец-цена)
 
 
-class OperatorSaleBranchTests(APITestCase):
-    """Продажа сотрудника пишется в ЕГО филиал — без «дефолтного» фолбэка."""
+class OperatorRequestTests(APITestCase):
+    """Двухэтапный учёт: оператор создаёт СКЛАДСКУЮ ЗАЯВКУ с кодами — БЕЗ продажи.
+
+    Продажа (Sale) рождается только при оприходовании складом (см. TwoStageFlowTests).
+    """
 
     def setUp(self):
-        _settings()
-        self.acc = Account.objects.create(name="Нал-бр", kind="CASH", currency="KGS", module="EXPRESS")
-        # Филиал по умолчанию + рабочий филиал сотрудника (НЕ дефолтный).
         self.default_branch = Branch.objects.create(name="Гульчинская", is_default=True)
         self.staff_branch = Branch.objects.create(name="Раззакова", is_default=False)
 
-    def _sale_body(self, code):
-        return {
-            "amount_mode": "DIRECT", "client_code": code, "price_som": "5000",
-            "account": self.acc.id, "date": "2026-06-01",
-        }
-
-    def test_sale_filed_to_operator_branch_not_default(self):
-        op = User.objects.create_user(
-            "op_br", password="pass1234", role=User.Role.OPERATOR, branch=self.staff_branch
-        )
+    def test_operator_cannot_create_direct_sale(self):
+        # Оператор снят со SaleViewSet — прямой продажи он больше не создаёт.
+        acc = Account.objects.create(name="Нал", kind="CASH", currency="KGS", module="EXPRESS")
+        op = User.objects.create_user("op_x", password="p", role=User.Role.OPERATOR, branch=self.staff_branch)
         self.client.force_authenticate(op)
-        r = self.client.post("/api/sales/", self._sale_body("A1"), format="json")
+        r = self.client.post("/api/sales/", {
+            "amount_mode": "DIRECT", "client_code": "A1", "price_som": "5000",
+            "account": acc.id, "date": "2026-06-01",
+        }, format="json")
+        self.assertEqual(r.status_code, 403)
+        self.assertFalse(Sale.objects.exists())
+
+    def test_operator_request_creates_items_no_sale(self):
+        op = User.objects.create_user("op_r", password="p", role=User.Role.OPERATOR, branch=self.staff_branch)
+        self.client.force_authenticate(op)
+        r = self.client.post("/api/warehouse-orders/", {"client_codes": ["A1", "A2", "A3"]}, format="json")
         self.assertEqual(r.status_code, 201, r.data)
-        sale = Sale.objects.get(client_code="A1")
-        # Ключевая проверка: филиал сотрудника, а НЕ филиал по умолчанию.
-        self.assertEqual(sale.branch_id, self.staff_branch.id)
-        self.assertNotEqual(sale.branch_id, self.default_branch.id)
+        order = WarehouseOrder.objects.get()
+        self.assertEqual(order.branch_id, self.staff_branch.id)  # филиал сотрудника
+        items = list(order.items.all())
+        self.assertEqual(len(items), 3)
+        # Все позиции «в поиске», продаж нет.
+        self.assertTrue(all(i.status == "IN_SEARCH" for i in items))
+        self.assertTrue(all(i.sale_id is None for i in items))
+        self.assertFalse(Sale.objects.exists())
 
-    def test_operator_without_branch_is_blocked(self):
-        op = User.objects.create_user("op_nb", password="pass1234", role=User.Role.OPERATOR)
+    def test_operator_without_branch_blocked(self):
+        op = User.objects.create_user("op_nb", password="p", role=User.Role.OPERATOR)
         self.client.force_authenticate(op)
-        r = self.client.post("/api/sales/", self._sale_body("B1"), format="json")
-        # Нет назначенного филиала → 400, продажа не создаётся (не пишем в дефолт).
+        r = self.client.post("/api/warehouse-orders/", {"client_codes": ["B1"]}, format="json")
         self.assertEqual(r.status_code, 400)
         self.assertIn("branch", r.data)
-        self.assertFalse(Sale.objects.filter(client_code="B1").exists())
-
-    def test_operator_sale_creates_warehouse_order_in_same_branch(self):
-        # Связка «Сотрудник → Склад»: продажа авто-создаёт заявку в филиал сотрудника,
-        # которую увидит складовщик того же филиала (см. WarehouseBranchScopeTests).
-        op = User.objects.create_user(
-            "op_wh", password="pass1234", role=User.Role.OPERATOR, branch=self.staff_branch
-        )
-        self.client.force_authenticate(op)
-        r = self.client.post("/api/sales/", self._sale_body("C1"), format="json")
-        self.assertEqual(r.status_code, 201, r.data)
-        # Продажа создала ровно одну заявку — она в филиале сотрудника.
-        wo = WarehouseOrder.objects.get()
-        self.assertEqual(wo.branch_id, self.staff_branch.id)
-        self.assertEqual(wo.client_codes, ["C1"])
+        self.assertFalse(WarehouseOrder.objects.exists())
 
 
 class WarehouseBranchScopeTests(APITestCase):
@@ -223,3 +215,163 @@ class WarehouseBranchScopeTests(APITestCase):
         self.assertEqual(r.status_code, 400)
         self.assertIn("branch", r.data)
         self.assertEqual(WarehouseOrder.objects.count(), before)  # ничего не создано
+
+
+class WarehouseNotFoundTests(APITestCase):
+    """Статус «Не найдено» — обратимое проблемное состояние (товара нет на складе)."""
+
+    def setUp(self):
+        self.branch = Branch.objects.create(name="Ф-НФ", is_default=True)
+        self.wh = User.objects.create_user(
+            "wh_nf", password="pass1234", role=User.Role.WAREHOUSE, branch=self.branch
+        )
+        self.order = WarehouseOrder.objects.create(
+            branch=self.branch, created_by=self.wh, client_codes=["X1"],
+            status=WarehouseOrder.Status.IN_PROGRESS,
+        )
+        self.client.force_authenticate(self.wh)
+
+    def _set(self, status, comment=None):
+        body = {"status": status}
+        if comment is not None:
+            body["comment"] = comment
+        return self.client.post(f"/api/warehouse-orders/{self.order.id}/status/", body, format="json")
+
+    def test_not_found_requires_reason(self):
+        r = self._set("NOT_FOUND")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("comment", r.data)
+
+    def test_mark_not_found_saves_reason(self):
+        r = self._set("NOT_FOUND", "нет на стеллаже A")
+        self.assertEqual(r.status_code, 200, r.data)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, "NOT_FOUND")
+        self.assertEqual(self.order.comment, "нет на стеллаже A")
+
+    def test_not_found_reversible_back_to_search(self):
+        self.order.status = WarehouseOrder.Status.NOT_FOUND
+        self.order.save()
+        r = self._set("IN_PROGRESS")  # нашёлся/приехал → снова в поиск
+        self.assertEqual(r.status_code, 200, r.data)
+        self.order.refresh_from_db()
+        self.assertEqual(self.order.status, "IN_PROGRESS")
+
+    def test_not_found_cannot_jump_straight_to_ready(self):
+        self.order.status = WarehouseOrder.Status.NOT_FOUND
+        self.order.save()
+        r = self._set("READY")  # только через «в поиск»
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("status", r.data)
+
+
+class TwoStageFlowTests(APITestCase):
+    """Полный двухэтапный цикл: заявка оператора → пошту́чное оприходование склада.
+
+    Проверяет ядро новой логики: продажа (и финансы) появляется ТОЛЬКО при FOUND;
+    NOT_FOUND продажи не создаёт; крестик оператора уводит позицию в вечерний
+    допоиск; складовщик видит вечерний список; «мои» позиции показывают статусы.
+    """
+
+    def setUp(self):
+        _settings()  # 3$ × 90 = 270 сом/кг
+        self.acc = Account.objects.create(name="Касса", kind="CASH", currency="KGS", module="EXPRESS")
+        self.branch = Branch.objects.create(name="Ф2", is_default=True)
+        self.op = User.objects.create_user("op2", password="p", role=User.Role.OPERATOR, branch=self.branch)
+        self.wh = User.objects.create_user("wh2", password="p", role=User.Role.WAREHOUSE, branch=self.branch)
+
+    def _make_order(self, codes):
+        self.client.force_authenticate(self.op)
+        r = self.client.post("/api/warehouse-orders/", {"client_codes": codes}, format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        return WarehouseOrder.objects.get()
+
+    def test_receive_creates_sale_only_on_found(self):
+        order = self._make_order(["F1", "N1"])
+        found_item, nf_item = order.items.order_by("id")
+        self.client.force_authenticate(self.wh)
+
+        # FOUND: вес 3 кг → продажа по тарифу (3 × 270 = 810), финансы видят её.
+        r = self.client.post(f"/api/warehouse-items/{found_item.id}/receive/",
+                             {"weight_kg": "3", "account": self.acc.id}, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        found_item.refresh_from_db()
+        self.assertEqual(found_item.status, "FOUND")
+        self.assertIsNotNone(found_item.sale_id)
+        self.assertEqual(found_item.sale.price_som, Decimal("810.00"))
+        self.assertEqual(found_item.sale.branch_id, self.branch.id)
+
+        # NOT_FOUND: причина, продажа НЕ создаётся.
+        r = self.client.post(f"/api/warehouse-items/{nf_item.id}/not-found/",
+                             {"reason": "нет на складе"}, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        nf_item.refresh_from_db()
+        self.assertEqual(nf_item.status, "NOT_FOUND")
+        self.assertIsNone(nf_item.sale_id)
+
+        # Финансы: ровно одна продажа — только оприходованная позиция.
+        self.assertEqual(Sale.objects.count(), 1)
+
+    def test_not_found_requires_reason(self):
+        order = self._make_order(["Z1"])
+        item = order.items.get()
+        self.client.force_authenticate(self.wh)
+        r = self.client.post(f"/api/warehouse-items/{item.id}/not-found/", {"reason": ""}, format="json")
+        self.assertEqual(r.status_code, 400)
+
+    def test_operator_dismiss_moves_to_evening_and_warehouse_sees_it(self):
+        order = self._make_order(["E1"])
+        item = order.items.get()
+        # Склад не нашёл.
+        self.client.force_authenticate(self.wh)
+        self.client.post(f"/api/warehouse-items/{item.id}/not-found/", {"reason": "нет"}, format="json")
+
+        # Оператор жмёт крестик → вечерний допоиск.
+        self.client.force_authenticate(self.op)
+        r = self.client.post(f"/api/warehouse-items/{item.id}/to-evening/", format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        item.refresh_from_db()
+        self.assertEqual(item.status, "EVENING")
+
+        # Складовщик видит его в вечернем списке (фильтр status=EVENING).
+        self.client.force_authenticate(self.wh)
+        r = self.client.get("/api/warehouse-items/", {"status": "EVENING"})
+        self.assertEqual(r.status_code, 200)
+        codes = [x["client_code"] for x in r.data.get("results", r.data)]
+        self.assertIn("E1", codes)
+
+    def test_operator_cannot_dismiss_found_item(self):
+        order = self._make_order(["G1"])
+        item = order.items.get()
+        self.client.force_authenticate(self.wh)
+        self.client.post(f"/api/warehouse-items/{item.id}/receive/",
+                        {"weight_kg": "2", "account": self.acc.id}, format="json")
+        # Крестик разрешён только для NOT_FOUND — на найденной позиции 400.
+        self.client.force_authenticate(self.op)
+        r = self.client.post(f"/api/warehouse-items/{item.id}/to-evening/", format="json")
+        self.assertEqual(r.status_code, 400)
+
+    def test_operator_mine_shows_per_code_status(self):
+        order = self._make_order(["M1", "M2"])
+        found, nf = order.items.order_by("id")
+        self.client.force_authenticate(self.wh)
+        self.client.post(f"/api/warehouse-items/{found.id}/receive/",
+                        {"weight_kg": "3", "account": self.acc.id}, format="json")
+        self.client.post(f"/api/warehouse-items/{nf.id}/not-found/", {"reason": "нет"}, format="json")
+
+        self.client.force_authenticate(self.op)
+        r = self.client.get("/api/warehouse-items/mine/")
+        self.assertEqual(r.status_code, 200)
+        rows = {x["client_code"]: x for x in r.data["results"]}
+        self.assertEqual(rows["M1"]["status"], "FOUND")
+        self.assertEqual(rows["M1"]["price_som"], "810.00")   # видит сумму найденного
+        self.assertEqual(rows["M2"]["status"], "NOT_FOUND")
+        self.assertIsNone(rows["M2"]["price_som"])            # у не найденного суммы нет
+
+    def test_operator_sees_only_own_items(self):
+        self._make_order(["OWN"])
+        other = User.objects.create_user("op_other", password="p", role=User.Role.OPERATOR, branch=self.branch)
+        self.client.force_authenticate(other)
+        r = self.client.get("/api/warehouse-items/mine/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data["count"], 0)  # чужие позиции не видит

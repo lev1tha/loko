@@ -14,14 +14,23 @@ from drf_spectacular.utils import (
     inline_serializer,
 )
 
-from accounts.permissions import DenyOperatorOrDirector, IsAdmin, SalesAccess, WarehouseAccess
+from accounts.permissions import (
+    DenyOperatorOrDirector,
+    IsAdmin,
+    SalesAccess,
+    WarehouseAccess,
+    WarehouseItemAccess,
+)
 from finance.models import Account, AppSettings, Branch
-from .models import ClientPrice, Sale, WarehouseOrder
+from .models import ClientPrice, Sale, WarehouseItem, WarehouseOrder
 from .serializers import (
     ClientPriceSerializer,
     OperatorSaleSerializer,
     SaleSerializer,
+    WarehouseItemSerializer,
+    WarehouseNotFoundSerializer,
     WarehouseOrderSerializer,
+    WarehouseReceiveSerializer,
     WarehouseStatusSerializer,
 )
 
@@ -81,32 +90,12 @@ class SaleViewSet(viewsets.ModelViewSet):
         return qs
 
     def perform_create(self, serializer):
-        user = self.request.user
-        # Филиал: у оператора («Сотрудник») — строго ЕГО закреплённый филиал (подмена
-        # невозможна, дефолтного фолбэка нет). Продажа записывается в тот филиал, к
-        # которому привязан сотрудник; филиал не назначен → это ошибка настройки, и
-        # мы блокируем с понятным сообщением, а не пишем молча «по умолчанию».
-        # У менеджера/админа — выбранный в форме, иначе филиал по умолчанию.
-        if getattr(user, "is_operator", False):
-            branch = user.branch
-            if branch is None:
-                raise serializers.ValidationError(
-                    {"branch": "Вам не назначен филиал. Обратитесь к администратору — "
-                               "он привяжет вас к филиалу в разделе «Пользователи»."}
-                )
-        else:
-            branch = serializer.validated_data.get("branch") or Branch.resolve_default()
-        sale = serializer.save(created_by=user, branch=branch)
-        # «Новая продажа» оператора = заявка на склад: автоматически создаём заявку
-        # на сборку из кода клиента — складовщик сразу её видит.
-        if getattr(user, "is_operator", False) and sale.client_code:
-            wo = WarehouseOrder.objects.create(
-                branch=branch,
-                created_by=user,
-                client_codes=[sale.client_code.strip()],
-                status=WarehouseOrder.Status.NEW,
-            )
-            wo.sales.add(sale)
+        # Прямая продажа Express — только кассир/админ (Sales.jsx). Оператор продажи
+        # НЕ создаёт: он формирует складскую заявку, а продажа рождается при
+        # оприходовании складовщиком (WarehouseItem.receive → Sale). Филиал —
+        # выбранный в форме, иначе филиал по умолчанию.
+        branch = serializer.validated_data.get("branch") or Branch.resolve_default()
+        serializer.save(created_by=self.request.user, branch=branch)
 
     @extend_schema(responses=OpenApiTypes.OBJECT)
     @action(detail=False, methods=["get"])
@@ -363,6 +352,7 @@ class SaleViewSet(viewsets.ModelViewSet):
         qs = (
             Sale.objects.filter(created_by=request.user, created_at__gte=month_start)
             .select_related("account")
+            .prefetch_related("warehouse_orders")
             .order_by("-created_at")
         )
         if request.query_params.get("export") == "xlsx":
@@ -468,7 +458,11 @@ class WarehouseOrderViewSet(viewsets.ModelViewSet):
     permission_classes = [WarehouseAccess]
 
     def get_queryset(self):
-        qs = WarehouseOrder.objects.select_related("branch", "created_by", "assigned_to")
+        qs = (
+            WarehouseOrder.objects
+            .select_related("branch", "created_by", "assigned_to")
+            .prefetch_related("items", "items__sale")
+        )
         user = self.request.user
         params = self.request.query_params
         # Склад и оператор — только заявки своего филиала.
@@ -483,6 +477,9 @@ class WarehouseOrderViewSet(viewsets.ModelViewSet):
             qs = qs.filter(status=status)
         if params.get("active") in ("1", "true", "True"):
             qs = qs.exclude(status__in=[WarehouseOrder.Status.ISSUED, WarehouseOrder.Status.CANCELLED])
+        # Дневная сборка: только заявки, где есть неоприходованные позиции «в поиске».
+        if params.get("active_items") in ("1", "true", "True"):
+            qs = qs.filter(items__status=WarehouseItem.Status.IN_SEARCH).distinct()
         search = (params.get("search") or "").strip().lower()
         if search:
             ids = [o.id for o in qs if any(search in str(c).lower() for c in (o.client_codes or []))]
@@ -492,8 +489,7 @@ class WarehouseOrderViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         user = self.request.user
         # Филиал заявки: у складовщика/оператора — строго ЕГО филиал (без дефолтного
-        # фолбэка, как и у продаж сотрудника). Не назначен → понятная ошибка вместо
-        # тихой записи «в дефолт». У менеджера/админа — выбранный, иначе по умолчанию.
+        # фолбэка). Не назначен → понятная ошибка. У менеджера/админа — выбранный.
         if getattr(user, "is_operator", False) or getattr(user, "is_warehouse", False):
             branch = user.branch
             if branch is None:
@@ -503,7 +499,11 @@ class WarehouseOrderViewSet(viewsets.ModelViewSet):
                 )
         else:
             branch = serializer.validated_data.get("branch") or user.branch or Branch.resolve_default()
-        serializer.save(created_by=user, branch=branch, status=WarehouseOrder.Status.NEW)
+        order = serializer.save(created_by=user, branch=branch, status=WarehouseOrder.Status.NEW)
+        # Двухэтапный учёт: каждая позиция стартует «в поиске», БЕЗ денег. Продажа
+        # (Sale) появится только при оприходовании конкретного кода складовщиком.
+        for code in serializer.validated_data.get("client_codes", []):
+            WarehouseItem.objects.create(order=order, client_code=code)
 
     @extend_schema(request=WarehouseStatusSerializer, responses=WarehouseOrderSerializer)
     @action(detail=True, methods=["patch", "post"], url_path="status")
@@ -526,6 +526,8 @@ class WarehouseOrderViewSet(viewsets.ModelViewSet):
             )
         if new_status == WarehouseOrder.Status.CANCELLED and not comment:
             raise serializers.ValidationError({"comment": "Укажите причину отмены."})
+        if new_status == WarehouseOrder.Status.NOT_FOUND and not comment:
+            raise serializers.ValidationError({"comment": "Укажите, что не найдено / где искали."})
 
         order.status = new_status
         if comment:
@@ -534,3 +536,106 @@ class WarehouseOrderViewSet(viewsets.ModelViewSet):
             order.assigned_to = user
         order.save()
         return Response(WarehouseOrderSerializer(order).data)
+
+
+@extend_schema_view(
+    list=extend_schema(
+        parameters=[
+            OpenApiParameter(
+                "status", OpenApiTypes.STR, enum=[s.value for s in WarehouseItem.Status],
+                description="Фильтр по статусу позиции (напр. EVENING — вечерний допоиск)",
+            ),
+        ]
+    )
+)
+class WarehouseItemViewSet(viewsets.ReadOnlyModelViewSet):
+    """Позиции складской заявки (двухэтапный учёт карго).
+
+    Складовщик оприходует ПОШТУ́ЧНО: ``receive`` (нашёл → вес → создаётся продажа)
+    или ``not_found`` (нет на складе). Оператор видит свои позиции (``mine``) и может
+    отправить не найденную в вечерний допоиск (``to_evening``). Область видимости
+    (свой филиал / свои позиции) — в ``get_queryset``.
+    """
+
+    serializer_class = WarehouseItemSerializer
+    permission_classes = [WarehouseItemAccess]
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = WarehouseItem.objects.select_related(
+            "order", "order__branch", "order__created_by", "sale"
+        )
+        if getattr(user, "is_warehouse", False):
+            qs = qs.filter(order__branch=user.branch) if user.branch_id else qs.none()
+        elif getattr(user, "is_operator", False):
+            qs = qs.filter(order__created_by=user)
+        # менеджер/админ — все позиции
+        status = self.request.query_params.get("status")
+        if status:
+            qs = qs.filter(status=status)
+        return qs.order_by("id")
+
+    @extend_schema(request=WarehouseReceiveSerializer, responses=WarehouseItemSerializer)
+    @action(detail=True, methods=["post"])
+    def receive(self, request, pk=None):
+        """Оприходовать позицию: фактический вес → продажа по тарифу → статус FOUND."""
+        item = self.get_object()
+        if item.status in WarehouseItem.FINANCIAL:
+            raise serializers.ValidationError({"status": "Позиция уже оприходована."})
+        ser = WarehouseReceiveSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        item.receive(ser.validated_data["weight_kg"], ser.validated_data["account"], by_user=request.user)
+        return Response(WarehouseItemSerializer(item).data)
+
+    @extend_schema(request=WarehouseNotFoundSerializer, responses=WarehouseItemSerializer)
+    @action(detail=True, methods=["post"], url_path="not-found")
+    def not_found(self, request, pk=None):
+        """Товара нет на складе: причина → статус NOT_FOUND (продажа не создаётся)."""
+        item = self.get_object()
+        if item.status in WarehouseItem.FINANCIAL:
+            raise serializers.ValidationError(
+                {"status": "Позиция уже оприходована — нельзя пометить «не найдено»."}
+            )
+        ser = WarehouseNotFoundSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        item.mark_not_found(ser.validated_data["reason"], by_user=request.user)
+        return Response(WarehouseItemSerializer(item).data)
+
+    @extend_schema(request=None, responses=WarehouseItemSerializer)
+    @action(detail=True, methods=["post"], url_path="to-evening")
+    def to_evening(self, request, pk=None):
+        """Оператор убирает не найденную позицию из чека → в вечерний допоиск склада."""
+        item = self.get_object()
+        if item.status != WarehouseItem.Status.NOT_FOUND:
+            raise serializers.ValidationError(
+                {"status": "В вечерний допоиск можно отправить только позицию «не найдено»."}
+            )
+        item.send_to_evening()
+        return Response(WarehouseItemSerializer(item).data)
+
+    @extend_schema(responses=OpenApiTypes.OBJECT)
+    @action(detail=False, methods=["get"])
+    def mine(self, request):
+        """Свои позиции сотрудника за текущий месяц (для «Мои продажи»).
+
+        Показывает статус каждого кода: в поиске / найдено (вес + сумма) / не найдено /
+        вечерний допоиск. Сумма берётся с созданной при оприходовании продажи."""
+        now_local = timezone.localtime(timezone.now())
+        month_start = now_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        qs = (
+            WarehouseItem.objects
+            .filter(order__created_by=request.user, created_at__gte=month_start)
+            .select_related("order", "order__branch", "order__created_by", "sale")
+            .order_by("-created_at", "-id")
+        )
+        data = WarehouseItemSerializer(qs, many=True).data
+        return Response({"count": qs.count(), "results": data})
+
+    @extend_schema(responses=OpenApiTypes.OBJECT)
+    @action(detail=False, methods=["get"])
+    def accounts(self, request):
+        """Пикер счёта зачисления (нал/безнал) для оприходования — только Express в сомах."""
+        qs = Account.objects.filter(
+            module="EXPRESS", currency="KGS", is_active=True
+        ).order_by("name")
+        return Response([{"id": a.id, "name": a.name, "kind": a.kind} for a in qs])

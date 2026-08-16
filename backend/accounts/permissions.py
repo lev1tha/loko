@@ -72,31 +72,23 @@ class DenyOperatorOrDirector(BasePermission):
 
 
 class SalesAccess(BasePermission):
-    """Sales endpoint access.
+    """Sales endpoint access — прямые продажи Express.
 
-    * Admin / Manager — full access (list, edit, delete, summary, …).
-    * Operator («Сотрудник») — may ONLY create a sale, request a price quote,
-      read the minimal Express-account picker, and list HIS OWN sales of the
-      last 24h (``mine``, + Excel export). No global list / edit / delete /
-      summary, so no financial figures (revenue, margin, debtors) are exposed.
-    * Director («Директор») — no access at all (read-only reports only).
+    * Admin / Manager — full access (list, edit, delete, summary, export, …).
+    * Operator / Warehouse / Director — no access. В двухэтапном учёте оператор
+      продажи напрямую НЕ создаёт: он формирует складскую заявку
+      (``WarehouseItemViewSet`` / ``WarehouseOrderViewSet``), а продажа рождается
+      при оприходовании складовщиком. Так операторам не видны финансовые цифры.
     """
 
-    message = "Сотрудник может только добавлять продажи."
-
-    # ViewSet actions an operator is allowed to perform.
-    # ``mine`` — свои продажи за последние сутки (+ выгрузка в Excel); финансовых
-    # полей других продаж и сводных цифр он по-прежнему не видит.
-    OPERATOR_ACTIONS = frozenset({"create", "quote", "express_accounts", "mine", "branches"})
+    message = "Прямое ведение продаж доступно только кассиру/администратору."
 
     def has_permission(self, request, view):
         user = request.user
         if not (user and user.is_authenticated):
             return False
-        if _is_director(user) or _is_warehouse(user):
+        if _is_director(user) or _is_warehouse(user) or _is_operator(user):
             return False
-        if _is_operator(user):
-            return getattr(view, "action", None) in self.OPERATOR_ACTIONS
         return True
 
 
@@ -125,4 +117,34 @@ class WarehouseAccess(BasePermission):
             return action in {"list", "retrieve", "create", "status"}
         if _is_operator(user):
             return action in {"list", "retrieve", "create"}
+        return True  # Manager / Admin — полный доступ
+
+
+class WarehouseItemAccess(BasePermission):
+    """Позиции складской заявки (двухэтапный учёт карго).
+
+    * Складовщик — позиции СВОЕГО филиала: список/просмотр, оприходование
+      (``receive`` / ``not_found`` / ``deliver``) и пикер счёта (``accounts``).
+    * Оператор — СВОИ позиции: список (``mine``) и отправка не найденной в вечерний
+      допоиск (``to_evening``). Финансовых цифр чужих позиций не видит.
+    * Директор — нет доступа. Менеджер / админ — полный доступ.
+    Фильтрация «только своё» — в ``get_queryset`` вьюсета (object-level).
+    """
+
+    message = "Недостаточно прав для позиций склада."
+
+    WAREHOUSE_ACTIONS = {"list", "retrieve", "receive", "not_found", "deliver", "accounts"}
+    OPERATOR_ACTIONS = {"mine", "to_evening"}
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not (user and user.is_authenticated):
+            return False
+        if _is_director(user):
+            return False
+        action = getattr(view, "action", None)
+        if _is_warehouse(user):
+            return action in self.WAREHOUSE_ACTIONS
+        if _is_operator(user):
+            return action in self.OPERATOR_ACTIONS
         return True  # Manager / Admin — полный доступ

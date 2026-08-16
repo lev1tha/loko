@@ -1,26 +1,29 @@
 import { useCallback, useEffect, useState } from 'react'
 import api, { errorMessage } from '../api/client'
-import { som, kg, dateTimeRu } from '../lib/format'
+import { som, kg } from '../lib/format'
 import { Alert } from '../components/ui'
 import { LoadingTruck } from '../components/states'
 
-// Страница роли «Сотрудник»: его собственные продажи (все, новые сверху) +
-// выгрузка в Excel. Финансовых полей (себестоимость/маржа) бэкенд не отдаёт —
-// только то, что сотрудник и так видел при создании (код, вес, кол-во, сумма).
+// Позиции найдены и оприходованы складом (в чеке клиента, с суммой).
+const FOUND = new Set(['FOUND', 'DELIVERED'])
+
+// Страница роли «Сотрудник»: свои позиции (коды) за текущий месяц с подсветкой
+// статуса склада. 🟢 найдено (вес + сумма) · 🔴 не найдено (можно убрать из чека
+// крестиком → вечерний допоиск) · ⚪ в поиске · вечерний допоиск (убрано из чека).
 export default function OperatorMySales() {
-  const [data, setData] = useState({ count: 0, total_som: 0, results: [] })
+  const [data, setData] = useState({ count: 0, results: [] })
   const [loading, setLoading] = useState(true)
-  const [exporting, setExporting] = useState(false)
+  const [busyId, setBusyId] = useState(null)
   const [error, setError] = useState('')
 
   const load = useCallback(() => {
     setLoading(true)
     api
-      .get('/sales/mine/')
+      .get('/warehouse-items/mine/')
       .then((res) => setData(res.data))
       .catch((err) => {
         setError(errorMessage(err))
-        setData({ count: 0, total_som: 0, results: [] })
+        setData({ count: 0, results: [] })
       })
       .finally(() => setLoading(false))
   }, [])
@@ -29,32 +32,27 @@ export default function OperatorMySales() {
     load()
   }, [load])
 
-  // Выгрузка в Excel (.xlsx с бэкенда). JWT идёт в заголовке, поэтому качаем
-  // через axios как blob, а не простой ссылкой.
-  async function exportXlsx() {
+  // Крестик: убрать не найденную позицию из чека клиента → вечерний допоиск склада.
+  async function dismiss(item) {
+    setBusyId(item.id)
     setError('')
-    setExporting(true)
     try {
-      const res = await api.get('/sales/mine/', {
-        params: { export: 'xlsx' },
-        responseType: 'blob',
-      })
-      const url = URL.createObjectURL(res.data)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = 'moi-prodazhi.xlsx'
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      URL.revokeObjectURL(url)
+      await api.post(`/warehouse-items/${item.id}/to-evening/`)
+      load()
     } catch (err) {
       setError(errorMessage(err))
     } finally {
-      setExporting(false)
+      setBusyId(null)
     }
   }
 
   if (loading) return <LoadingTruck />
+
+  const rows = data.results || []
+  // Сумма к оплате клиентом = только найденное (оприходованное).
+  const totalFound = rows
+    .filter((r) => FOUND.has(r.status))
+    .reduce((sum, r) => sum + (parseFloat(r.price_som) || 0), 0)
 
   return (
     <div className="operator-card card">
@@ -63,37 +61,50 @@ export default function OperatorMySales() {
           <h2 className="card-title">Мои продажи</h2>
           <p className="muted operator-sales-sub">
             За текущий месяц
-            {data.count > 0 && ` · ${data.count} шт · ${som(data.total_som)}`}
+            {rows.length > 0 && ` · ${rows.length} позиций · к оплате ${som(totalFound)}`}
           </p>
         </div>
-        <button
-          type="button"
-          className="btn btn-secondary btn-sm"
-          onClick={exportXlsx}
-          disabled={exporting || !data.results.length}
-        >
-          {exporting ? 'Выгрузка…' : 'Excel'}
-        </button>
       </div>
 
       {error && <Alert kind="error">{error}</Alert>}
 
-      {!data.results.length ? (
-        <p className="muted" style={{ margin: 0 }}>В этом месяце продаж пока нет.</p>
+      {!rows.length ? (
+        <p className="muted" style={{ margin: 0 }}>В этом месяце заявок пока нет.</p>
       ) : (
         <div className="operator-sales">
-          {data.results.map((s) => (
-            <div key={s.id} className="operator-sales-row">
-              <div className="operator-sales-main">
-                <span className="operator-sales-code">{s.client_code}</span>
-                <span className="operator-sales-meta">
-                  {dateTimeRu(s.created_at)}
-                  {s.weight_kg ? ` · ${kg(s.weight_kg)}` : ''} · {s.places} шт · {s.account_name}
-                </span>
+          {rows.map((s) => {
+            const found = FOUND.has(s.status)
+            return (
+              <div key={s.id} className={`operator-sales-row wh-row-${s.status.toLowerCase()}`}>
+                <div className="operator-sales-main">
+                  <span className="operator-sales-code">{s.client_code}</span>
+                  <span className="operator-sales-meta">
+                    {found
+                      ? `оприходовано${s.weight_kg ? ` · ${kg(s.weight_kg)}` : ''}`
+                      : s.status === 'NOT_FOUND'
+                        ? `не найдено${s.reason ? ` · ${s.reason}` : ''}`
+                        : s.status === 'EVENING'
+                          ? 'убрано из чека · вечерний допоиск'
+                          : 'в поиске'}
+                  </span>
+                </div>
+
+                {found && <span className="operator-sales-sum">{som(s.price_som)}</span>}
+
+                {s.status === 'NOT_FOUND' && (
+                  <button
+                    type="button"
+                    className="btn btn-icon wh-remove"
+                    title="Убрать из чека (в вечерний допоиск)"
+                    disabled={busyId === s.id}
+                    onClick={() => dismiss(s)}
+                  >
+                    ✕
+                  </button>
+                )}
               </div>
-              <span className="operator-sales-sum">{som(s.price_som)}</span>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>
