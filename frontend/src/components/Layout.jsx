@@ -30,6 +30,7 @@ const GROUPS = [
     title: 'Loko Express',
     items: [
       { to: '/sales', label: 'Продажи', icon: IconSales },
+      { to: '/express/clients', label: 'Клиенты', icon: IconUsers },
       { to: '/express/client-prices', label: 'Цены клиентов', icon: IconAccounts },
       { to: '/express/other-income', label: 'Прочий доход', icon: IconSales },
       { to: '/express/expenses', label: 'Расходы', icon: IconExpense },
@@ -57,6 +58,7 @@ const GROUPS = [
     items: [
       { to: '/expenses', label: 'Расходы', icon: IconExpense },
       { to: '/reports', label: 'Аналитика', icon: IconReports },
+      { to: '/bonuses', label: 'Бонусы сотрудников', icon: IconUsers },
     ],
   },
 ]
@@ -83,6 +85,7 @@ const TITLES = {
   '/control': ['Сверка', 'Как складываются итоги — сверка с тетрадью'],
   '/journal': ['История операций', 'Все события (Express + Business) и как из них вышли цифры'],
   '/sales': ['Продажи', 'Loko Express · учёт карго и расчёт маржи'],
+  '/express/clients': ['Клиенты', 'Регистрация по телефону (QR) · история заказов и бонусы'],
   '/express/client-prices': ['Цены клиентов', 'Индивидуальная цена за кг по клиентам (исключения из цены по умолчанию)'],
   '/express/other-income': ['Прочий доход', 'Доходы не от карго — в выручку без себестоимости 55%'],
   '/express/expenses': ['Расходы · Loko Express', 'Типы расходов, изъятия и статьи — по Express'],
@@ -100,6 +103,7 @@ const TITLES = {
   '/business/reports': ['Аналитика · Loko Business', 'ОПиУ и ОДДС по направлению Business'],
   '/expenses': ['Расходы', 'Категории, статьи OpEx и списание со счетов'],
   '/reports': ['Аналитика', 'ООПИУ и ОДДС за период'],
+  '/bonuses': ['Бонусы сотрудников', 'Месячные бонусы по KPI: оборот, звёзды, стаж и ручные надбавки'],
   '/settings': ['Настройки', 'Ценообразование, курсы и налог'],
   '/users': ['Пользователи', 'Управление доступом и ролями'],
   '/branches': ['Филиалы', 'Точки приёма Loko Express — управление филиалами'],

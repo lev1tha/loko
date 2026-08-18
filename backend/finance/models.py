@@ -622,3 +622,45 @@ class OtherIncome(models.Model):
 
     def __str__(self) -> str:
         return f"Прочий доход {self.amount} — {self.description[:30]}"
+
+
+class EmployeeBonus(models.Model):
+    """Месячные бонусы сотрудника (KPI-система «внутрянки»).
+
+    Итог за месяц = оклад + дисциплина + проверка (тайный клиент) + оборот (кг
+    филиала) + звёзды от клиентов + стаж + отзывы (тарифы — в ``finance/bonuses.py``).
+    Здесь ХРАНЯТСЯ только «ручные» значения, которые не вытащить из данных; оборот и
+    стаж считаются на лету, звёзды — вручную, пока не подключена клиентская оценка.
+    """
+
+    employee = models.ForeignKey(
+        dj_settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name="bonuses", verbose_name="Сотрудник",
+    )
+    period = models.CharField(max_length=7, verbose_name="Месяц", help_text="Формат YYYY-MM")
+    oklad = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal("20000"), verbose_name="Оклад",
+    )
+    discipline_ok = models.BooleanField(default=True, verbose_name="Дисциплина соблюдена")
+    inspection_score = models.DecimalField(
+        max_digits=3, decimal_places=1, null=True, blank=True,
+        verbose_name="Проверка (тайный клиент), 1–5",
+    )
+    stars = models.DecimalField(
+        max_digits=3, decimal_places=1, null=True, blank=True,
+        verbose_name="Звёзды от клиентов, 1–5",
+    )
+    reviews_count = models.PositiveIntegerField(
+        default=0, verbose_name="Положительных отзывов (2ГИС/Instagram)",
+    )
+    note = models.CharField(max_length=255, blank=True, verbose_name="Комментарий")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Бонус сотрудника"
+        verbose_name_plural = "Бонусы сотрудников"
+        unique_together = ("employee", "period")
+        ordering = ("-period", "employee_id")
+
+    def __str__(self) -> str:
+        return f"{self.employee} · {self.period}"

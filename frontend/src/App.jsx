@@ -10,6 +10,7 @@ import NotFound from './pages/NotFound'
 import Dashboard from './pages/Dashboard'
 import Control from './pages/Control'
 import Sales from './pages/Sales'
+import Clients from './pages/Clients'
 import ClientPrices from './pages/ClientPrices'
 import OtherIncome from './pages/OtherIncome'
 import OperatorSale from './pages/OperatorSale'
@@ -25,6 +26,7 @@ import BusinessOrders from './pages/BusinessOrders'
 import Journal from './pages/Journal'
 import Calculator from './pages/Calculator'
 import Reports from './pages/Reports'
+import Bonuses from './pages/Bonuses'
 import Settings from './pages/Settings'
 import Users from './pages/Users'
 import Branches from './pages/Branches'
@@ -124,6 +126,7 @@ function AppRoutes() {
 
         {/* Loko Express */}
         <Route path="sales" element={<Sales />} />
+        <Route path="express/clients" element={<Clients />} />
         <Route path="express/client-prices" element={<ClientPrices />} />
         <Route path="express/other-income" element={<OtherIncome lockedModule="EXPRESS" />} />
         <Route path="express/expenses" element={<Expenses lockedModule="EXPRESS" />} />
@@ -145,6 +148,7 @@ function AppRoutes() {
         {/* Финансы */}
         <Route path="expenses" element={<Expenses />} />
         <Route path="reports" element={<Reports />} />
+        <Route path="bonuses" element={<Bonuses />} />
 
         {/* Совместимость со старыми ссылками */}
         <Route path="accounts" element={<Navigate to="/express/accounts" replace />} />

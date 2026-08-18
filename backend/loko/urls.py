@@ -12,18 +12,24 @@ from accounts.views import LokoTokenObtainPairView, UserViewSet
 from business.views import DebtViewSet, DepositViewSet
 from express.views import (
     ClientPriceViewSet,
+    ClientViewSet,
     SaleViewSet,
     WarehouseItemViewSet,
     WarehouseOrderViewSet,
+    public_branches,
+    public_intake,
+    public_track,
 )
 from finance.views import (
     AccountViewSet,
     AppSettingsView,
     BranchViewSet,
+    EmployeeBonusViewSet,
     ExpenseViewSet,
     OtherIncomeViewSet,
     TransferViewSet,
     balances,
+    bonuses_report,
     breakdown_report,
     business_orders_report,
     cashflow_report,
@@ -44,13 +50,19 @@ router.register("sales", SaleViewSet, basename="sale")
 router.register("client-prices", ClientPriceViewSet, basename="client-price")
 router.register("warehouse-orders", WarehouseOrderViewSet, basename="warehouse-order")
 router.register("warehouse-items", WarehouseItemViewSet, basename="warehouse-item")
+router.register("clients", ClientViewSet, basename="client")
 router.register("deposits", DepositViewSet, basename="deposit")
 router.register("debts", DebtViewSet, basename="debt")
+router.register("bonuses", EmployeeBonusViewSet, basename="bonus")
 
 api_urlpatterns = [
-    # Auth (login is the only public endpoint)
+    # Auth (login is public)
     path("auth/login/", LokoTokenObtainPairView.as_view(), name="login"),
     path("auth/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
+    # Публичные (клиентская QR-страница, без входа): филиалы, самозапись, трекинг.
+    path("public/branches/", public_branches, name="public-branches"),
+    path("public/intake/", public_intake, name="public-intake"),
+    path("public/track/", public_track, name="public-track"),
     # Settings + reports
     path("settings/", AppSettingsView.as_view(), name="settings"),
     path("reports/pnl/", pnl_report, name="pnl"),
@@ -61,6 +73,7 @@ api_urlpatterns = [
     path("reports/business-orders/", business_orders_report, name="business_orders"),
     path("reports/journal/", journal_report, name="journal"),
     path("reports/breakdown/", breakdown_report, name="breakdown"),
+    path("reports/bonuses/", bonuses_report, name="bonuses"),
     # OpenAPI schema + interactive docs (Swagger / Redoc)
     path("schema/", SpectacularAPIView.as_view(), name="schema"),
     path("docs/", SpectacularSwaggerView.as_view(url_name="api:schema"), name="swagger-ui"),

@@ -1,12 +1,13 @@
 from decimal import Decimal
 
+from django.db.models import Sum
 from rest_framework import serializers
 
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema_field
 
-from finance.models import Account
-from .models import ClientPrice, Sale, WarehouseItem, WarehouseOrder
+from finance.models import Account, Branch
+from .models import Client, ClientPrice, Sale, WarehouseItem, WarehouseOrder
 
 
 class SaleSerializer(serializers.ModelSerializer):
@@ -250,3 +251,63 @@ class WarehouseNotFoundSerializer(serializers.Serializer):
         if not value:
             raise serializers.ValidationError("Укажите причину — что не найдено.")
         return value
+
+
+class ClientSerializer(serializers.ModelSerializer):
+    """Клиент для CRM админа: имя, телефон и агрегаты (заказов, кг, сумма)."""
+
+    orders_count = serializers.SerializerMethodField()
+    total_kg = serializers.SerializerMethodField()
+    total_som = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Client
+        fields = ("id", "phone", "name", "created_at", "orders_count", "total_kg", "total_som")
+
+    def _found(self, obj):
+        return WarehouseItem.objects.filter(
+            order__client=obj,
+            status__in=[WarehouseItem.Status.FOUND, WarehouseItem.Status.DELIVERED],
+        )
+
+    def _agg(self, obj, field, places):
+        v = self._found(obj).aggregate(s=Sum(field))["s"] or Decimal("0")
+        return str(Decimal(str(v)).quantize(places))
+
+    @extend_schema_field(OpenApiTypes.INT)
+    def get_orders_count(self, obj):
+        return obj.orders.count()
+
+    @extend_schema_field(OpenApiTypes.DECIMAL)
+    def get_total_kg(self, obj):
+        return self._agg(obj, "weight_kg", Decimal("0.001"))
+
+    @extend_schema_field(OpenApiTypes.DECIMAL)
+    def get_total_som(self, obj):
+        return self._agg(obj, "sale__price_som", Decimal("0.01"))
+
+
+class PublicIntakeSerializer(serializers.Serializer):
+    """Самозапись клиента по QR: филиал + телефон + имя + коды (публично, без входа)."""
+
+    branch = serializers.PrimaryKeyRelatedField(queryset=Branch.objects.filter(is_active=True))
+    phone = serializers.CharField(max_length=32)
+    name = serializers.CharField(max_length=160, required=False, allow_blank=True, default="")
+    client_codes = serializers.ListField(child=serializers.CharField(), allow_empty=False)
+
+    def validate_phone(self, value):
+        if len(Client.normalize_phone(value)) < 6:
+            raise serializers.ValidationError("Укажите корректный номер телефона.")
+        return value
+
+    def validate_client_codes(self, value):
+        codes = []
+        for c in value:
+            c = str(c).strip()
+            if c and c not in codes:
+                codes.append(c)
+        if not (1 <= len(codes) <= WarehouseOrder.MAX_CODES):
+            raise serializers.ValidationError(
+                f"Укажите от 1 до {WarehouseOrder.MAX_CODES} кодов клиента."
+            )
+        return codes

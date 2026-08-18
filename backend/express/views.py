@@ -1,9 +1,10 @@
 from decimal import Decimal, InvalidOperation
 
-from django.db.models import Count, Sum
+from django.db.models import Count, Q, Sum
 from django.utils import timezone
 from rest_framework import serializers, viewsets
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 
 from drf_spectacular.types import OpenApiTypes
@@ -22,10 +23,12 @@ from accounts.permissions import (
     WarehouseItemAccess,
 )
 from finance.models import Account, AppSettings, Branch
-from .models import ClientPrice, Sale, WarehouseItem, WarehouseOrder
+from .models import Client, ClientPrice, Sale, WarehouseItem, WarehouseOrder
 from .serializers import (
     ClientPriceSerializer,
+    ClientSerializer,
     OperatorSaleSerializer,
+    PublicIntakeSerializer,
     SaleSerializer,
     WarehouseItemSerializer,
     WarehouseNotFoundSerializer,
@@ -639,3 +642,94 @@ class WarehouseItemViewSet(viewsets.ReadOnlyModelViewSet):
             module="EXPRESS", currency="KGS", is_active=True
         ).order_by("name")
         return Response([{"id": a.id, "name": a.name, "kind": a.kind} for a in qs])
+
+
+# ---------------------------------------------------------------------------
+# Публичные эндпоинты клиента (QR-страница, БЕЗ входа). Клиент узнаётся по
+# телефону; заявка попадает складовщику филиала так же, как «Новая продажа».
+# ---------------------------------------------------------------------------
+
+@extend_schema(responses=OpenApiTypes.OBJECT, tags=["public"])
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def public_branches(request):
+    """Список филиалов для клиентской страницы (id/name активных). Публично."""
+    qs = Branch.objects.filter(is_active=True).order_by("name")
+    return Response([{"id": b.id, "name": b.name} for b in qs])
+
+
+@extend_schema(request=PublicIntakeSerializer, responses=OpenApiTypes.OBJECT, tags=["public"])
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def public_intake(request):
+    """Самозапись клиента по QR: телефон + имя + коды → заявка складу (позиции «в поиске»).
+
+    Клиент регистрируется/находится по телефону; продажа НЕ создаётся (родится при
+    оприходовании складом). Филиал берётся из QR."""
+    ser = PublicIntakeSerializer(data=request.data)
+    ser.is_valid(raise_exception=True)
+    d = ser.validated_data
+    client = Client.get_or_register(d["phone"], d.get("name", ""))
+    order = WarehouseOrder.objects.create(
+        branch=d["branch"], client=client,
+        status=WarehouseOrder.Status.NEW, client_codes=d["client_codes"],
+    )
+    for code in d["client_codes"]:
+        WarehouseItem.objects.create(order=order, client_code=code)
+    return Response(
+        {"ok": True, "client_name": client.name, "codes": d["client_codes"]},
+        status=201,
+    )
+
+
+@extend_schema(
+    parameters=[OpenApiParameter("phone", OpenApiTypes.STR, description="Телефон клиента")],
+    responses=OpenApiTypes.OBJECT, tags=["public"],
+)
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def public_track(request):
+    """Трекинг по телефону: статусы/цены кодов клиента + бонус за вес. Публично."""
+    phone = Client.normalize_phone(request.query_params.get("phone"))
+    if len(phone) < 6:
+        return Response({"found": False, "reason": "no_phone"})
+    client = Client.objects.filter(phone=phone).first()
+    if client is None:
+        return Response({"found": False})
+    items = (
+        WarehouseItem.objects
+        .filter(order__client=client)
+        .select_related("order", "order__branch", "sale")
+        .order_by("-id")
+    )
+    total_kg = sum((i.weight_kg or ZERO) for i in items if i.status in WarehouseItem.FINANCIAL)
+    free_kg = int(total_kg // 20) * Decimal("0.5")
+    return Response({
+        "found": True,
+        "client": {"name": client.name, "phone": client.phone},
+        "bonus": {"total_kg": str(total_kg), "free_kg": str(free_kg)},
+        "items": WarehouseItemSerializer(items, many=True).data,
+    })
+
+
+@extend_schema_view(
+    list=extend_schema(
+        parameters=[OpenApiParameter("search", OpenApiTypes.STR, description="Поиск по имени/телефону")]
+    )
+)
+class ClientViewSet(viewsets.ReadOnlyModelViewSet):
+    """Клиенты (CRM) — имя, телефон, история заказов (кг/сумма). Кассир/админ."""
+
+    serializer_class = ClientSerializer
+    permission_classes = [DenyOperatorOrDirector]
+
+    def get_queryset(self):
+        qs = Client.objects.all()
+        search = (self.request.query_params.get("search") or "").strip()
+        if search:
+            digits = Client.normalize_phone(search)
+            cond = Q(name__icontains=search)
+            if digits:
+                cond |= Q(phone__icontains=digits)
+            qs = qs.filter(cond)
+        return qs

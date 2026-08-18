@@ -781,3 +781,14 @@ textarea.input { height: auto; padding: 10px 14px; resize: vertical; min-height:
 @keyframes wheel-spin { to { transform: rotate(360deg) } }
 @keyframes motion-dash { 0% { opacity: 0; transform: translateX(10px) } 40% { opacity: 1 } 100% { opacity: 0; transform: translateX(-12px) } }
 @keyframes parcel-wiggle { 0%, 100% { transform: rotate(0) } 50% { transform: rotate(4deg) } }
+
+/* Таблица бонусов сотрудников (KPI за месяц) */
+.bonus-table th { white-space: nowrap; vertical-align: bottom; }
+.bonus-table .th-sub { font-weight: 500; font-size: 10px; color: var(--muted); text-transform: none; letter-spacing: 0; }
+.bonus-table td { vertical-align: top; }
+.input-cell { max-width: 82px; padding: 5px 8px; font-size: 13px; }
+.cell-auto { display: inline-block; font-size: 13px; font-weight: 600; color: var(--ink); white-space: nowrap; padding-top: 6px; }
+.cell-center { text-align: center; vertical-align: middle; }
+.part-hint { font-size: 11px; color: #0f9d58; font-weight: 700; margin-top: 3px; white-space: nowrap; }
+.bonus-table tfoot td { border-top: 2px solid var(--hairline); background: var(--surface-soft, #f8fafc); }
+.row-busy { opacity: .55; }

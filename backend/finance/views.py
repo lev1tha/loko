@@ -10,7 +10,8 @@ from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 
 from accounts.permissions import DenyOperator, DenyOperatorOrDirector, IsAdmin
-from .models import Account, AppSettings, Branch, Expense, OtherIncome, Transfer
+from .bonuses import build_bonuses
+from .models import Account, AppSettings, Branch, EmployeeBonus, Expense, OtherIncome, Transfer
 from .reports import (
     accounts_snapshot,
     breakdown,
@@ -25,6 +26,7 @@ from .serializers import (
     AccountSerializer,
     AppSettingsSerializer,
     BranchSerializer,
+    EmployeeBonusSerializer,
     ExpenseSerializer,
     OtherIncomeSerializer,
     TransferSerializer,
@@ -390,3 +392,36 @@ def breakdown_report(request):
     branch = _scoped_branch(request)
     basis = request.query_params.get("basis", "accrual")
     return Response(breakdown(line, date_from, date_to, payment, module, basis, branch=branch))
+
+
+@extend_schema(
+    parameters=[OpenApiParameter("period", OpenApiTypes.STR, description="Месяц в формате YYYY-MM (по умолчанию текущий)")],
+    responses=OpenApiTypes.OBJECT,
+    tags=["reports"],
+)
+@api_view(["GET"])
+@permission_classes([DenyOperatorOrDirector])
+def bonuses_report(request):
+    """Месячные бонусы всех сотрудников (KPI-система). Менеджер/админ.
+
+    Оборот и стаж считаются из данных; оклад/дисциплина/проверка/звёзды/отзывы —
+    ручные (правятся через PATCH /api/bonuses/<id>/)."""
+    import re
+    from django.utils import timezone
+
+    period = request.query_params.get("period") or ""
+    if not re.match(r"^\d{4}-\d{2}$", period):
+        period = timezone.localdate().strftime("%Y-%m")
+    return Response({"period": period, "rows": build_bonuses(period)})
+
+
+class EmployeeBonusViewSet(viewsets.ModelViewSet):
+    """Правка «ручных» полей бонуса (оклад/дисциплина/проверка/звёзды/отзывы).
+
+    Список с расчётом — отдельным отчётом ``/api/reports/bonuses/``. Здесь только
+    PATCH по id (строки создаются при расчёте). Доступ — менеджер/админ."""
+
+    queryset = EmployeeBonus.objects.all()
+    serializer_class = EmployeeBonusSerializer
+    permission_classes = [DenyOperatorOrDirector]
+    http_method_names = ["patch", "head", "options"]

@@ -4,8 +4,9 @@ from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from .models import (
-    Account, AppSettings, Branch, Currency, Expense, ExpenseArticle, ExpenseCategory,
-    FINANCING_ARTICLES, INVESTING_ARTICLES, OPERATING_ARTICLES, OtherIncome, Transfer,
+    Account, AppSettings, Branch, Currency, EmployeeBonus, Expense, ExpenseArticle,
+    ExpenseCategory, FINANCING_ARTICLES, INVESTING_ARTICLES, OPERATING_ARTICLES,
+    OtherIncome, Transfer,
 )
 
 _KGS_FIELD = serializers.DecimalField(max_digits=16, decimal_places=2)
@@ -279,4 +280,32 @@ class OtherIncomeSerializer(serializers.ModelSerializer):
     def validate_amount(self, value):
         if value <= 0:
             raise serializers.ValidationError("Сумма должна быть больше нуля.")
+        return value
+
+
+class EmployeeBonusSerializer(serializers.ModelSerializer):
+    """Правка «ручных» полей бонуса сотрудника (расчётные считаются в bonuses.py)."""
+
+    class Meta:
+        model = EmployeeBonus
+        fields = (
+            "id", "employee", "period", "oklad", "discipline_ok",
+            "inspection_score", "stars", "reviews_count", "note", "updated_at",
+        )
+        read_only_fields = ("id", "employee", "period", "updated_at")
+
+    def _check_0_5(self, value, field):
+        if value is not None and not (Decimal("0") <= value <= Decimal("5")):
+            raise serializers.ValidationError(f"{field} — оценка от 0 до 5.")
+        return value
+
+    def validate_inspection_score(self, value):
+        return self._check_0_5(value, "Проверка")
+
+    def validate_stars(self, value):
+        return self._check_0_5(value, "Звёзды")
+
+    def validate_oklad(self, value):
+        if value < 0:
+            raise serializers.ValidationError("Оклад не может быть отрицательным.")
         return value

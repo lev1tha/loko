@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model
 from rest_framework.test import APITestCase
 
 from finance.models import Account, AppSettings, Branch
-from express.models import ClientPrice, Sale, WarehouseOrder
+from express.models import Client, ClientPrice, Sale, WarehouseOrder
 
 User = get_user_model()
 
@@ -375,3 +375,69 @@ class TwoStageFlowTests(APITestCase):
         r = self.client.get("/api/warehouse-items/mine/")
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.data["count"], 0)  # чужие позиции не видит
+
+
+class ClientRegistrationTests(APITestCase):
+    """Регистрация клиента по телефону (QR, публично), трекинг и CRM."""
+
+    def setUp(self):
+        self.branch = Branch.objects.create(name="Ф-CRM", is_default=True)
+
+    def _intake(self, phone, codes, name=""):
+        return self.client.post("/api/public/intake/", {
+            "branch": self.branch.id, "phone": phone, "name": name, "client_codes": codes,
+        }, format="json")
+
+    def test_public_intake_registers_and_creates_items_no_sale(self):
+        r = self._intake("+996 700 12-34-56", ["A1", "A2"], name="Азамат")  # анонимно
+        self.assertEqual(r.status_code, 201, r.data)
+        client = Client.objects.get()
+        self.assertEqual(client.phone, "996700123456")   # нормализован в цифры
+        self.assertEqual(client.name, "Азамат")
+        order = WarehouseOrder.objects.get()
+        self.assertEqual(order.client_id, client.id)
+        self.assertIsNone(order.created_by_id)            # создал сам клиент
+        self.assertEqual(order.items.count(), 2)
+        self.assertTrue(all(i.status == "IN_SEARCH" for i in order.items.all()))
+        self.assertFalse(Sale.objects.exists())           # продажи нет
+
+    def test_same_phone_different_format_is_one_client(self):
+        self._intake("+996 700 111 222", ["X1"])
+        self._intake("996700111222", ["X2"])
+        self.assertEqual(Client.objects.filter(phone="996700111222").count(), 1)
+        self.assertEqual(Client.objects.get(phone="996700111222").orders.count(), 2)
+
+    def test_public_track_by_phone(self):
+        self._intake("996700999", ["T1"], name="Бек")
+        r = self.client.get("/api/public/track/", {"phone": "+996 700 999"})
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.data["found"])
+        self.assertEqual(r.data["client"]["name"], "Бек")
+        self.assertIn("T1", [i["client_code"] for i in r.data["items"]])
+
+    def test_track_unknown_phone(self):
+        r = self.client.get("/api/public/track/", {"phone": "996000000"})
+        self.assertEqual(r.status_code, 200)
+        self.assertFalse(r.data["found"])
+
+    def test_crm_access_and_stats(self):
+        _settings()
+        acc = Account.objects.create(name="K", kind="CASH", currency="KGS", module="EXPRESS")
+        self._intake("996700555", ["F", "N"], name="Сеит")
+        order = WarehouseOrder.objects.get()
+        f = order.items.order_by("id").first()
+        wh = User.objects.create_user("wh_crm", password="p", role=User.Role.WAREHOUSE, branch=self.branch)
+        f.receive(Decimal("5"), acc, by_user=wh)          # FOUND: 5 кг × 270 = 1350
+
+        # оператору CRM закрыт
+        self.client.force_authenticate(User.objects.create_user("op_crm", password="p", role=User.Role.OPERATOR))
+        self.assertEqual(self.client.get("/api/clients/").status_code, 403)
+
+        # менеджер видит клиента с агрегатами (только оприходованное)
+        self.client.force_authenticate(User.objects.create_user("mgr_crm", password="p", role=User.Role.MANAGER))
+        r = self.client.get("/api/clients/")
+        self.assertEqual(r.status_code, 200)
+        row = next(c for c in r.data.get("results", r.data) if c["name"] == "Сеит")
+        self.assertEqual(row["orders_count"], 1)
+        self.assertEqual(row["total_kg"], "5.000")
+        self.assertEqual(row["total_som"], "1350.00")

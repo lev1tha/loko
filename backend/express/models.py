@@ -263,9 +263,16 @@ class WarehouseOrder(models.Model):
         "finance.Branch", on_delete=models.PROTECT, related_name="warehouse_orders",
         verbose_name="Филиал сборки",
     )
+    # Клиент заявки (по телефону, если пришла через QR/самообслуживание). У заявок,
+    # созданных оператором вручную, может быть пусто.
+    client = models.ForeignKey(
+        "Client", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="orders", verbose_name="Клиент",
+    )
     created_by = models.ForeignKey(
-        dj_settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
-        related_name="warehouse_orders_created", verbose_name="Создал (оператор/менеджер)",
+        dj_settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True,
+        related_name="warehouse_orders_created",
+        verbose_name="Создал (оператор/менеджер; пусто — самим клиентом)",
     )
     assigned_to = models.ForeignKey(
         dj_settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
@@ -387,3 +394,43 @@ class WarehouseItem(models.Model):
         """Оператор отказался от не найденной позиции → в вечерний допоиск."""
         self.status = self.Status.EVENING
         self.save(update_fields=["status", "updated_at"])
+
+
+class Client(models.Model):
+    """Клиент карго — узнаём по ТЕЛЕФОНУ (регистрация на QR-странице).
+
+    Хранит имя и телефон; история (заказов, кг, сумма) считается по связанным
+    заявкам (``orders``). Телефон канонизируется в цифры — для единственности и
+    поиска, чтобы «+996 700 12 34 56» и «996 7001234 56» были одним клиентом.
+    """
+
+    phone = models.CharField(max_length=32, unique=True, verbose_name="Телефон (канонический)")
+    name = models.CharField(max_length=160, blank=True, verbose_name="Имя")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Клиент"
+        verbose_name_plural = "Клиенты"
+        ordering = ("-created_at", "-id")
+
+    def __str__(self) -> str:
+        return f"{self.name or 'Клиент'} · {self.phone}"
+
+    @staticmethod
+    def normalize_phone(raw) -> str:
+        """Канонический телефон — только цифры."""
+        return "".join(ch for ch in str(raw or "") if ch.isdigit())
+
+    @classmethod
+    def get_or_register(cls, raw_phone, name=""):
+        """Найти клиента по телефону или зарегистрировать. Имя дополняем, не затираем."""
+        phone = cls.normalize_phone(raw_phone)
+        if not phone:
+            return None
+        client, _ = cls.objects.get_or_create(phone=phone)
+        name = (name or "").strip()
+        if name and not client.name:
+            client.name = name
+            client.save(update_fields=["name", "updated_at"])
+        return client
