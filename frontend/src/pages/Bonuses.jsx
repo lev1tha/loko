@@ -85,7 +85,7 @@ export default function Bonuses() {
                   <th>Дисц.<br /><span className="th-sub">+2000</span></th>
                   <th>Проверка<br /><span className="th-sub">1–5</span></th>
                   <th>Оборот<br /><span className="th-sub">кг · сом</span></th>
-                  <th>Звёзды<br /><span className="th-sub">1–5</span></th>
+                  <th>Звёзды<br /><span className="th-sub">авто/ручное</span></th>
                   <th>Стаж<br /><span className="th-sub">мес · сом</span></th>
                   <th>Отзывы<br /><span className="th-sub">×200</span></th>
                   <th className="num">Итого</th>
@@ -132,10 +132,12 @@ export default function Bonuses() {
                       <td>
                         <input
                           className="input input-cell" type="number" min="0" max="5" step="0.5"
-                          value={r.stars ?? ''} placeholder="—"
+                          value={r.stars ?? ''} placeholder={r.auto_stars != null ? `авто ${r.auto_stars}` : '—'}
+                          title={r.auto_stars != null ? 'Пусто = авто-среднее из оценок клиентов; число — ручное переопределение' : ''}
                           onChange={(e) => edit(r.id, 'stars', e.target.value)}
                           onBlur={(e) => save(r.id, 'stars', e.target.value)}
                         />
+                        {r.auto_stars != null && <div className="auto-hint">★ {r.auto_stars} · {r.ratings_count} оц.</div>}
                         <PartHint value={r.parts?.stars} />
                       </td>
                       <td>

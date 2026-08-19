@@ -15,7 +15,7 @@
 from datetime import date
 from decimal import Decimal
 
-from django.db.models import Sum
+from django.db.models import Avg, Count, Sum
 
 DEFAULT_OKLAD = Decimal("20000")
 DISCIPLINE_BONUS = Decimal("2000")
@@ -73,9 +73,16 @@ def build_bonuses(period: str):
     from django.contrib.auth import get_user_model
     from .models import EmployeeBonus
 
+    from express.models import EmployeeRating
+
     User = get_user_model()
     start, end, year, month = _period_range(period)
     by_branch, total_kg = _turnover_by_branch(start, end)
+    # Средняя оценка клиентов по каждому сотруднику (для авто-звёзд).
+    ratings = {
+        r["employee_id"]: r
+        for r in EmployeeRating.objects.values("employee_id").annotate(avg=Avg("stars"), cnt=Count("id"))
+    }
 
     employees = (
         User.objects.filter(role__in=BONUS_ROLES, is_active=True)
@@ -91,13 +98,18 @@ def build_bonuses(period: str):
         joined = emp.date_joined.date() if hasattr(emp.date_joined, "date") else emp.date_joined
         months = (year - joined.year) * 12 + (month - joined.month)
         months = max(months, 0)
+        # Звёзды: авто-среднее из оценок клиентов; ручное значение переопределяет.
+        ra = ratings.get(emp.id)
+        auto_stars = Decimal(str(ra["avg"])).quantize(Decimal("0.1")) if ra and ra["avg"] is not None else None
+        ratings_count = ra["cnt"] if ra else 0
+        eff_stars = row.stars if row.stars is not None else auto_stars
 
         parts = {
             "oklad": row.oklad,
             "discipline": DISCIPLINE_BONUS if row.discipline_ok else Decimal("0"),
             "inspection": tier_bonus(row.inspection_score, INSPECTION_TIERS),
             "turnover": tier_bonus(branch_kg, TURNOVER_TIERS),
-            "stars": tier_bonus(row.stars, STARS_TIERS),
+            "stars": tier_bonus(eff_stars, STARS_TIERS),
             "tenure": tier_bonus(months, TENURE_TIERS),
             "reviews": REVIEW_EACH * row.reviews_count,
         }
@@ -120,6 +132,8 @@ def build_bonuses(period: str):
             # расчётные
             "turnover_kg": branch_kg,
             "tenure_months": months,
+            "auto_stars": str(auto_stars) if auto_stars is not None else None,
+            "ratings_count": ratings_count,
             "parts": parts,
             "total": total,
         })

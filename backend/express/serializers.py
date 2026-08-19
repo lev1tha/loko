@@ -311,3 +311,11 @@ class PublicIntakeSerializer(serializers.Serializer):
                 f"Укажите от 1 до {WarehouseOrder.MAX_CODES} кодов клиента."
             )
         return codes
+
+
+class PublicRateSerializer(serializers.Serializer):
+    """Клиент ставит звёзды сотруднику (публично, по телефону). 1–5."""
+
+    phone = serializers.CharField(max_length=32)
+    employee = serializers.IntegerField()
+    stars = serializers.IntegerField(min_value=1, max_value=5)

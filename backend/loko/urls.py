@@ -18,6 +18,7 @@ from express.views import (
     WarehouseOrderViewSet,
     public_branches,
     public_intake,
+    public_rate,
     public_track,
 )
 from finance.views import (
@@ -63,6 +64,7 @@ api_urlpatterns = [
     path("public/branches/", public_branches, name="public-branches"),
     path("public/intake/", public_intake, name="public-intake"),
     path("public/track/", public_track, name="public-track"),
+    path("public/rate/", public_rate, name="public-rate"),
     # Settings + reports
     path("settings/", AppSettingsView.as_view(), name="settings"),
     path("reports/pnl/", pnl_report, name="pnl"),

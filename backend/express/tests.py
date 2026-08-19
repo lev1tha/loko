@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model
 from rest_framework.test import APITestCase
 
 from finance.models import Account, AppSettings, Branch
-from express.models import Client, ClientPrice, Sale, WarehouseOrder
+from express.models import Client, ClientPrice, EmployeeRating, Sale, WarehouseOrder
 
 User = get_user_model()
 
@@ -441,3 +441,68 @@ class ClientRegistrationTests(APITestCase):
         self.assertEqual(row["orders_count"], 1)
         self.assertEqual(row["total_kg"], "5.000")
         self.assertEqual(row["total_som"], "1350.00")
+
+
+class AutoStarsTests(APITestCase):
+    """Клиент оценивает сотрудника → средняя оценка авто-питает бонус «звёзды»."""
+
+    def setUp(self):
+        _settings()
+        self.branch = Branch.objects.create(name="Ф-star", is_default=True)
+        self.acc = Account.objects.create(name="K★", kind="CASH", currency="KGS", module="EXPRESS")
+        self.wh = User.objects.create_user("wh_star", password="p", role=User.Role.WAREHOUSE, branch=self.branch)
+
+    def _client_served(self, phone, name):
+        # клиент по QR → склад оприходует один код (found_by = self.wh)
+        self.client.post("/api/public/intake/", {
+            "branch": self.branch.id, "phone": phone, "name": name, "client_codes": ["C1"],
+        }, format="json")
+        cl = Client.objects.get(phone=Client.normalize_phone(phone))
+        WarehouseOrder.objects.get(client=cl).items.first().receive(Decimal("5"), self.acc, by_user=self.wh)
+        return cl
+
+    def test_track_lists_servant_staff(self):
+        self._client_served("996700111", "А")
+        r = self.client.get("/api/public/track/", {"phone": "996700111"})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual([s["id"] for s in r.data["staff"]], [self.wh.id])
+        self.assertEqual(r.data["staff"][0]["my_stars"], 0)
+
+    def test_rate_only_servant_and_upsert(self):
+        self._client_served("996700222", "Б")
+        r = self.client.post("/api/public/rate/", {"phone": "996700222", "employee": self.wh.id, "stars": 5}, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(EmployeeRating.objects.get(employee=self.wh).stars, 5)
+        # повторная оценка — обновление, не дубль
+        self.client.post("/api/public/rate/", {"phone": "996700222", "employee": self.wh.id, "stars": 4}, format="json")
+        self.assertEqual(EmployeeRating.objects.filter(employee=self.wh).count(), 1)
+        self.assertEqual(EmployeeRating.objects.get(employee=self.wh).stars, 4)
+        # нельзя оценить того, кто не обслуживал
+        other = User.objects.create_user("wh_other", password="p", role=User.Role.WAREHOUSE, branch=self.branch)
+        r = self.client.post("/api/public/rate/", {"phone": "996700222", "employee": other.id, "stars": 5}, format="json")
+        self.assertEqual(r.status_code, 400)
+
+    def test_auto_stars_feed_bonus(self):
+        from finance.bonuses import build_bonuses
+        from django.utils import timezone
+        self._client_served("996700333", "В")
+        self._client_served("996700444", "Г")
+        self.client.post("/api/public/rate/", {"phone": "996700333", "employee": self.wh.id, "stars": 5}, format="json")
+        self.client.post("/api/public/rate/", {"phone": "996700444", "employee": self.wh.id, "stars": 4}, format="json")
+        period = timezone.localdate().strftime("%Y-%m")
+        row = next(r for r in build_bonuses(period) if r["employee"] == self.wh.id)
+        self.assertEqual(row["auto_stars"], "4.5")          # среднее (5+4)/2
+        self.assertEqual(row["ratings_count"], 2)
+        self.assertEqual(row["parts"]["stars"], Decimal("4500"))  # 4.5 → 4500
+
+    def test_manual_stars_override_auto(self):
+        from finance.bonuses import build_bonuses
+        from finance.models import EmployeeBonus
+        from django.utils import timezone
+        self._client_served("996700555", "Д")
+        self.client.post("/api/public/rate/", {"phone": "996700555", "employee": self.wh.id, "stars": 5}, format="json")
+        period = timezone.localdate().strftime("%Y-%m")
+        eb = EmployeeBonus.objects.get_or_create(employee=self.wh, period=period)[0]
+        eb.stars = Decimal("3"); eb.save()               # ручное переопределяет авто 5
+        row = next(r for r in build_bonuses(period) if r["employee"] == self.wh.id)
+        self.assertEqual(row["parts"]["stars"], Decimal("2000"))  # 3 → 2000

@@ -792,3 +792,6 @@ textarea.input { height: auto; padding: 10px 14px; resize: vertical; min-height:
 .part-hint { font-size: 11px; color: #0f9d58; font-weight: 700; margin-top: 3px; white-space: nowrap; }
 .bonus-table tfoot td { border-top: 2px solid var(--hairline); background: var(--surface-soft, #f8fafc); }
 .row-busy { opacity: .55; }
+
+/* Авто-звёзды в таблице бонусов: среднее из оценок клиентов под ручным вводом. */
+.auto-hint { font-size: 11px; color: #b8860b; font-weight: 700; margin-top: 3px; white-space: nowrap; }

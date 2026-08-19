@@ -23,12 +23,13 @@ from accounts.permissions import (
     WarehouseItemAccess,
 )
 from finance.models import Account, AppSettings, Branch
-from .models import Client, ClientPrice, Sale, WarehouseItem, WarehouseOrder
+from .models import Client, ClientPrice, EmployeeRating, Sale, WarehouseItem, WarehouseOrder
 from .serializers import (
     ClientPriceSerializer,
     ClientSerializer,
     OperatorSaleSerializer,
     PublicIntakeSerializer,
+    PublicRateSerializer,
     SaleSerializer,
     WarehouseItemSerializer,
     WarehouseNotFoundSerializer,
@@ -696,20 +697,56 @@ def public_track(request):
     client = Client.objects.filter(phone=phone).first()
     if client is None:
         return Response({"found": False})
-    items = (
+    items = list(
         WarehouseItem.objects
         .filter(order__client=client)
-        .select_related("order", "order__branch", "sale")
+        .select_related("order", "order__branch", "sale", "found_by")
         .order_by("-id")
     )
     total_kg = sum((i.weight_kg or ZERO) for i in items if i.status in WarehouseItem.FINANCIAL)
     free_kg = int(total_kg // 20) * Decimal("0.5")
+    # Сотрудники, оприходовавшие груз клиента — их можно оценить (звёзды).
+    staff = {}
+    for it in items:
+        u = it.found_by
+        if u and it.status in WarehouseItem.FINANCIAL and u.id not in staff:
+            staff[u.id] = {"id": u.id, "name": u.get_full_name() or u.username, "role": u.get_role_display(), "my_stars": 0}
+    if staff:
+        given = EmployeeRating.objects.filter(client=client, employee_id__in=staff.keys())
+        for r in given:
+            staff[r.employee_id]["my_stars"] = r.stars
     return Response({
         "found": True,
         "client": {"name": client.name, "phone": client.phone},
         "bonus": {"total_kg": str(total_kg), "free_kg": str(free_kg)},
         "items": WarehouseItemSerializer(items, many=True).data,
+        "staff": list(staff.values()),
     })
+
+
+@extend_schema(request=PublicRateSerializer, responses=OpenApiTypes.OBJECT, tags=["public"])
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def public_rate(request):
+    """Клиент ставит звёзды сотруднику (1–5). Оценить можно только того, кто реально
+    оприходовал груз этого клиента — иначе оценки можно было бы накрутить."""
+    ser = PublicRateSerializer(data=request.data)
+    ser.is_valid(raise_exception=True)
+    d = ser.validated_data
+    client = Client.objects.filter(phone=Client.normalize_phone(d["phone"])).first()
+    if client is None:
+        raise serializers.ValidationError({"phone": "Клиент не найден — сначала сдайте коды."})
+    served = WarehouseItem.objects.filter(
+        order__client=client, found_by_id=d["employee"], status__in=WarehouseItem.FINANCIAL,
+    ).exists()
+    if not served:
+        raise serializers.ValidationError({"employee": "Этот сотрудник не обслуживал ваш груз."})
+    from django.contrib.auth import get_user_model
+    emp = get_user_model().objects.get(id=d["employee"])
+    EmployeeRating.objects.update_or_create(
+        employee=emp, client=client, defaults={"stars": d["stars"]},
+    )
+    return Response({"ok": True, "employee": emp.id, "stars": d["stars"]})
 
 
 @extend_schema_view(

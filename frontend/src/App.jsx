@@ -1,4 +1,5 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import ClientApp from './client/ClientApp'
 import { AuthProvider, useAuth } from './auth/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -33,6 +34,11 @@ import Branches from './pages/Branches'
 import Guide from './pages/Guide'
 
 export default function App() {
+  // Публичная клиентская страница по QR (/track?b=…) — отдельное приложение без
+  // входа и вне AuthProvider (клиент узнаётся по телефону, не по JWT).
+  if (window.location.pathname.startsWith('/track')) {
+    return <ClientApp />
+  }
   return (
     <AuthProvider>
       <BrowserRouter>

@@ -1,0 +1,126 @@
+/* Клиентская страница (публичная, по QR). Всё scoped под .client-app, чтобы не
+   пересекаться с index.css основного приложения. Один светлый вид (витрина). */
+.client-app{
+  --bg:#f4f6f9; --surface:#fff; --surface-2:#f0f3f7;
+  --ink:#141821; --ink-2:#5c6879; --ink-3:#8b97a8;
+  --border:#e4e9ef; --border-2:#d3dbe4;
+  --accent:#ff5a1f; --accent-ink:#e64a12; --accent-soft:#fff1ea;
+  --gold:#b8860b; --gold-soft:#fbf3dd; --gold-ink:#8a6408;
+  --ok:#0f9d58; --ok-soft:#e7f6ee; --ok-ink:#0b7a44;
+  --wait:#e0891b; --wait-soft:#fdf1de; --wait-ink:#9a5c05;
+  --miss:#e0403f; --miss-soft:#fdecec; --miss-ink:#b02b2a;
+  --shadow:0 1px 2px rgba(20,24,33,.05),0 18px 40px -24px rgba(20,24,33,.28);
+  --font:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  position:fixed;inset:0;overflow-y:auto;background:var(--bg);color:var(--ink);
+  font-family:var(--font);line-height:1.55;-webkit-font-smoothing:antialiased;
+}
+.client-app *{box-sizing:border-box}
+.client-app .wrap{max-width:520px;margin:0 auto;padding:0 16px}
+.client-app .gi{flex:none;display:inline-block;width:18px;height:18px}
+@keyframes c-rise{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
+.client-app .rise{animation:c-rise .3s cubic-bezier(.2,.7,.2,1) both}
+
+.client-app .topbar{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--bg) 85%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--border)}
+.client-app .topbar-in{display:flex;align-items:center;justify-content:space-between;padding:12px 0}
+.client-app .brand{display:flex;align-items:center;gap:9px;font-weight:800;letter-spacing:-.02em;font-size:16px}
+.client-app .logo{width:29px;height:29px;border-radius:9px;background:var(--accent);color:#fff;display:grid;place-items:center;font-weight:900;font-size:16px}
+.client-app .branch-pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--ink-2);background:var(--surface-2);border:1px solid var(--border);border-radius:999px;padding:4px 10px;white-space:nowrap}
+.client-app .branch-pill .gi{width:14px;height:14px;color:var(--accent-ink)}
+.client-app .exit{background:none;border:0;color:var(--ink-3);font-size:12.5px;cursor:pointer;font-family:var(--font)}
+
+.client-app input{font-family:var(--mono);font-size:16px;color:var(--ink)}
+.client-app .lbl{font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-3);margin:0 0 7px}
+.client-app .inp{width:100%;border:1.5px solid var(--border-2);background:var(--surface);border-radius:13px;padding:13px 14px;outline:none;transition:border-color .15s,box-shadow .15s}
+.client-app .inp:focus{border-color:var(--accent);box-shadow:0 0 0 4px var(--accent-soft)}
+.client-app .inp::placeholder{color:var(--ink-3)}
+.client-app .btn{width:100%;border:0;border-radius:13px;background:var(--accent);color:#fff;font-weight:700;font-size:15.5px;padding:14px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px;font-family:var(--font);transition:transform .1s,filter .15s}
+.client-app .btn:hover{filter:brightness(1.06)} .client-app .btn:active{transform:scale(.98)} .client-app .btn:disabled{opacity:.5;cursor:default}
+.client-app .err{background:var(--miss-soft);color:var(--miss-ink);border:1px solid #f0c8c8;border-radius:12px;padding:11px 14px;font-size:13.5px;margin:14px 0}
+
+.client-app .gate{padding:44px 0 20px;text-align:center}
+.client-app .kick{display:inline-flex;gap:7px;align-items:center;font-family:var(--mono);font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent-ink);background:var(--accent-soft);border:1px solid color-mix(in srgb,var(--accent) 22%,transparent);padding:5px 11px;border-radius:999px;font-weight:600}
+.client-app .gate h1{font-size:clamp(27px,7vw,36px);line-height:1.05;letter-spacing:-.03em;margin:16px 0 8px;font-weight:820;text-wrap:balance}
+.client-app .gate .subt{color:var(--ink-2);font-size:15px;max-width:32ch;margin:0 auto 24px}
+.client-app .gate-card{background:var(--surface);border:1px solid var(--border);border-radius:18px;box-shadow:var(--shadow);padding:20px;text-align:left;display:flex;flex-direction:column;gap:12px}
+.client-app .gate-note{font-size:12.5px;color:var(--ink-3);margin:12px 2px 0;text-align:center}
+
+.client-app .card{background:var(--surface);border:1px solid var(--border);border-radius:18px;box-shadow:var(--shadow);overflow:hidden}
+.client-app .sec{margin:14px 0}
+.client-app .sec-h{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin:0 4px 9px}
+.client-app .sec-h h2{font-size:16px;font-weight:750;margin:0}
+.client-app .sec-h .a{font-size:12.5px;color:var(--ink-3)}
+
+.client-app .hello{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 17px;background:linear-gradient(135deg,var(--accent-soft),transparent)}
+.client-app .hello .who{font-weight:750;font-size:16px}
+.client-app .hello .ph{font-family:var(--mono);font-size:12.5px;color:var(--ink-2)}
+
+.client-app .bonus-card{padding:16px 17px;background:linear-gradient(135deg,var(--gold-soft),transparent)}
+.client-app .bonus-top{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:10px}
+.client-app .bonus-lbl{font-weight:750;font-size:14.5px;display:inline-flex;align-items:center;gap:7px}
+.client-app .bonus-lbl .gi{width:18px;height:18px;color:var(--gold-ink)}
+.client-app .bonus-free{font-weight:800;font-size:19px;color:var(--gold-ink);font-variant-numeric:tabular-nums}
+.client-app .bonus-free span{font-size:12px;font-weight:600;color:var(--ink-2)}
+.client-app .bonus-bar{height:9px;border-radius:999px;background:color-mix(in srgb,var(--gold) 18%,var(--surface));overflow:hidden;border:1px solid color-mix(in srgb,var(--gold) 22%,transparent)}
+.client-app .bonus-fill{height:100%;border-radius:999px;background:linear-gradient(90deg,var(--gold),var(--accent));transition:width .5s cubic-bezier(.2,.7,.2,1)}
+.client-app .bonus-note{margin-top:9px;font-size:12.5px;color:var(--ink-2)}
+.client-app .bonus-note b{color:var(--ink);font-weight:700}
+
+.client-app .addrow{display:flex;gap:8px;margin-bottom:8px}
+.client-app .addrow .inp{flex:1}
+.client-app .code-x{flex:none;width:46px;border-radius:11px;border:1px solid var(--border);background:var(--surface);color:var(--ink-3);cursor:pointer;font-size:15px}
+.client-app .add-more{align-self:flex-start;background:none;border:0;color:var(--accent-ink);font-weight:600;font-size:13px;cursor:pointer;padding:4px 2px;margin-bottom:12px;font-family:var(--font)}
+
+.client-app .items{display:flex;flex-direction:column;gap:11px}
+.client-app .item{background:var(--surface);border:1px solid var(--border);border-radius:18px;box-shadow:var(--shadow);overflow:hidden}
+.client-app .item-top{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 16px}
+.client-app .code{font-family:var(--mono);font-weight:700;font-size:16px}
+.client-app .code .l{display:block;font-family:var(--font);font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);margin-bottom:1px}
+.client-app .badge{flex:none;display:inline-flex;align-items:center;gap:6px;font-weight:700;font-size:12.5px;padding:5px 11px;border-radius:999px;white-space:nowrap}
+.client-app .badge .dot{width:7px;height:7px;border-radius:50%}
+.client-app .b-ok{color:var(--ok-ink);background:var(--ok-soft)} .client-app .b-ok .dot{background:var(--ok)}
+.client-app .b-wait{color:var(--wait-ink);background:var(--wait-soft)} .client-app .b-wait .dot{background:var(--wait)}
+.client-app .b-miss{color:var(--miss-ink);background:var(--miss-soft)} .client-app .b-miss .dot{background:var(--miss)}
+.client-app .rail{display:flex;align-items:center;padding:2px 16px 14px}
+.client-app .step{flex:1;display:flex;flex-direction:column;align-items:center;gap:5px;position:relative}
+.client-app .step .ic{width:24px;height:24px;border-radius:50%;display:grid;place-items:center;background:var(--surface-2);color:var(--ink-3);border:2px solid var(--border-2);z-index:1}
+.client-app .step .ic .gi{width:13px;height:13px}
+.client-app .step .cap{font-size:10.5px;color:var(--ink-3);font-weight:600}
+.client-app .step.done .ic{background:var(--ok);border-color:var(--ok);color:#fff} .client-app .step.done .cap{color:var(--ink-2)}
+.client-app .step.now .ic{background:var(--wait);border-color:var(--wait);color:#fff;box-shadow:0 0 0 4px var(--wait-soft)} .client-app .step.now .cap{color:var(--wait-ink)}
+.client-app .lnk{position:absolute;top:12px;left:-50%;width:100%;height:2px;background:var(--border-2);z-index:0}
+.client-app .step.done .lnk,.client-app .step.now .lnk{background:var(--ok)} .client-app .step:first-child .lnk{display:none}
+.client-app .pay{margin:0 16px 14px;padding:13px 15px;border-radius:12px;background:linear-gradient(135deg,var(--ok-soft),transparent);border:1px solid color-mix(in srgb,var(--ok) 22%,transparent);display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.client-app .pay .k{font-size:12.5px;color:var(--ink-2);font-weight:600}
+.client-app .pay .v{font-size:23px;font-weight:800;font-variant-numeric:tabular-nums}
+.client-app .pay .v small{font-size:14px;font-weight:600;color:var(--ink-2)}
+.client-app .meta{padding:0 16px 15px;display:grid;gap:8px;font-size:13px}
+.client-app .meta .r{display:flex;gap:10px;align-items:center}
+.client-app .meta .r .i{width:18px;display:inline-flex;align-items:center;justify-content:center;color:var(--accent-ink)}
+.client-app .meta .r .i .gi{width:17px;height:17px}
+.client-app .meta .r b{color:var(--ink)} .client-app .meta .r span{color:var(--ink-2)}
+.client-app .note{padding:13px 16px 15px;font-size:13px;color:var(--ink-2);border-top:1px dashed var(--border)}
+.client-app .total{background:var(--surface);border:1px dashed var(--border-2);border-radius:14px;padding:14px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px}
+.client-app .total .k{font-size:13px;color:var(--ink-2)} .client-app .total .v{font-size:20px;font-weight:800;color:var(--ok-ink);font-variant-numeric:tabular-nums}
+.client-app .empty{text-align:center;color:var(--ink-3);padding:22px;font-size:13.5px}
+
+.client-app .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%) translateY(-4px);background:var(--ink);color:var(--bg);font-size:13.5px;font-weight:600;padding:11px 18px;border-radius:12px;box-shadow:var(--shadow);z-index:20}
+
+/* Оценка сотрудников (звёзды) */
+.client-app .rate-card{padding:0;overflow:hidden}
+.client-app .rate-row{display:flex;align-items:center;gap:12px;padding:13px 15px;border-bottom:1px solid var(--border)}
+.client-app .rate-row:last-child{border-bottom:0}
+.client-app .ava{flex:none;width:40px;height:40px;border-radius:50%;background:var(--accent-soft);color:var(--accent-ink);display:grid;place-items:center;font-weight:800;font-size:13px}
+.client-app .rate-main{min-width:0}
+.client-app .rate-role{font-size:14px;font-weight:700;color:var(--ink)}
+.client-app .rate-role .rl{color:var(--ink-3);font-weight:600}
+.client-app .stars{display:flex;gap:2px;margin-top:5px;margin-left:-3px}
+.client-app .star-btn{padding:3px;border:0;background:none;cursor:pointer;color:var(--ink-3);line-height:0;border-radius:6px}
+.client-app .star-btn .gi{width:26px;height:26px}
+.client-app .star-btn.on{color:var(--gold)} .client-app .star-btn.on .gi{fill:var(--gold)}
+.client-app .star-btn:active{transform:scale(.88)}
+
+.client-app footer{margin-top:26px;border-top:1px solid var(--border);padding:20px 0 40px;text-align:center}
+.client-app .maker{display:inline-flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--border);border-radius:999px;padding:7px 14px;font-size:12px;color:var(--ink-2);box-shadow:var(--shadow)}
+.client-app .maker b{color:var(--ink);font-weight:800}
+.client-app .maker .mf{font-weight:900;background:linear-gradient(90deg,#ff5a1f,#b8860b);-webkit-background-clip:text;background-clip:text;color:transparent}

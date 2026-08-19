@@ -434,3 +434,32 @@ class Client(models.Model):
             client.name = name
             client.save(update_fields=["name", "updated_at"])
         return client
+
+
+class EmployeeRating(models.Model):
+    """Оценка сотрудника клиентом (звёзды 1–5) — питает бонус «звёзды».
+
+    Одна оценка на пару (сотрудник, клиент); клиент может её обновить. Оценивать
+    можно только того, кто реально оприходовал груз клиента (проверка во вьюсете).
+    Средняя оценка сотрудника авто-подставляется в столбец «Звёзды» его бонуса.
+    """
+
+    employee = models.ForeignKey(
+        dj_settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name="ratings_received", verbose_name="Сотрудник",
+    )
+    client = models.ForeignKey(
+        Client, on_delete=models.CASCADE, related_name="ratings_given", verbose_name="Клиент",
+    )
+    stars = models.PositiveSmallIntegerField(verbose_name="Звёзды (1–5)")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Оценка сотрудника"
+        verbose_name_plural = "Оценки сотрудников (клиентами)"
+        unique_together = ("employee", "client")
+        ordering = ("-updated_at",)
+
+    def __str__(self) -> str:
+        return f"{self.employee} · {self.stars}★ от {self.client}"
