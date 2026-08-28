@@ -93,3 +93,41 @@ class BonusComputeTests(APITestCase):
         row = next(x for x in build_bonuses(self.period) if x["employee"] == op.id)
         # 20000 + 0(дисциплина снята) + 6000(звёзды 5) = 26000
         self.assertEqual(row["total"], Decimal("26000"))
+
+
+class BranchQrTests(APITestCase):
+    """QR филиала: ссылка track_url + генерация SVG/PNG; закрыт для оператора."""
+
+    def setUp(self):
+        from django.conf import settings
+        self.settings_url = settings.PUBLIC_SITE_URL.rstrip("/")
+        self.admin = User.objects.create_user("admin_qr", password="Zx9!mfP2qL", role=User.Role.ADMIN)
+        self.branch = Branch.objects.create(name="Ф-QR", is_default=False)
+
+    def _row(self, data):
+        rows = data if isinstance(data, list) else data.get("results", [])
+        return next(x for x in rows if x["id"] == self.branch.id)
+
+    def test_track_url_points_to_public_track_page(self):
+        self.client.force_authenticate(self.admin)
+        row = self._row(self.client.get("/api/branches/").data)
+        self.assertEqual(row["track_url"], f"{self.settings_url}/track?b={self.branch.id}")
+
+    def test_qr_svg_and_png(self):
+        self.client.force_authenticate(self.admin)
+        r = self.client.get(f"/api/branches/{self.branch.id}/qr/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r["Content-Type"], "image/svg+xml")
+        self.assertIn(b"<svg", r.content)
+        r2 = self.client.get(f"/api/branches/{self.branch.id}/qr/?fmt=png")
+        self.assertEqual(r2.status_code, 200)
+        self.assertEqual(r2["Content-Type"], "image/png")
+        self.assertEqual(r2.content[:8], b"\x89PNG\r\n\x1a\n")  # PNG magic
+
+    def test_qr_denied_for_operator(self):
+        op = User.objects.create_user("op_qr", password="Zx9!mfP2qL", role=User.Role.OPERATOR, branch=self.branch)
+        self.client.force_authenticate(op)
+        self.assertEqual(self.client.get(f"/api/branches/{self.branch.id}/qr/").status_code, 403)
+
+    def test_qr_requires_auth(self):
+        self.assertEqual(self.client.get(f"/api/branches/{self.branch.id}/qr/").status_code, 401)

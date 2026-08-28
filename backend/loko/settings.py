@@ -286,6 +286,11 @@ CSRF_TRUSTED_ORIGINS = config(
     cast=Csv(),
 )
 
+# Public base URL of the client SPA (where the /track page lives). This is the
+# FRONTEND host (lokobooking.com), not the API host — it's what per-branch QR
+# codes point to. Override per environment; dev default is the Vite server.
+PUBLIC_SITE_URL = config("PUBLIC_SITE_URL", default="http://localhost:5174")
+
 # ---------------------------------------------------------------------------
 # Production hardening — active behind Cloudflare (HTTPS terminated by CF).
 # ---------------------------------------------------------------------------

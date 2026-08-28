@@ -1,5 +1,8 @@
 from decimal import Decimal
 
+from django.conf import settings
+
+from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
@@ -31,10 +34,17 @@ class AppSettingsSerializer(serializers.ModelSerializer):
 class BranchSerializer(serializers.ModelSerializer):
     """Филиал Loko Express (админ управляет; менеджер читает для фильтра/формы)."""
 
+    # Публичная ссылка клиентской страницы этого филиала — то, что зашивается в QR.
+    track_url = serializers.SerializerMethodField()
+
     class Meta:
         model = Branch
-        fields = ("id", "name", "address", "is_active", "is_default", "created_at")
+        fields = ("id", "name", "address", "is_active", "is_default", "track_url", "created_at")
         read_only_fields = ("created_at",)
+
+    @extend_schema_field(OpenApiTypes.URI)
+    def get_track_url(self, obj):
+        return f"{settings.PUBLIC_SITE_URL.rstrip('/')}/track?b={obj.id}"
 
     def validate_name(self, value):
         value = (value or "").strip()

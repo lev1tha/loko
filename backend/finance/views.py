@@ -1,8 +1,12 @@
+import io
 from decimal import Decimal, InvalidOperation
 
+import segno
+from django.conf import settings
 from django.db.models import ProtectedError
+from django.http import HttpResponse
 from rest_framework import viewsets
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -149,7 +153,8 @@ class BranchViewSet(viewsets.ModelViewSet):
         return qs
 
     def get_permissions(self):
-        if self.action in ("list", "retrieve"):
+        # Чтение (в т.ч. QR филиала) — менеджер/админ; запись — только админ.
+        if self.action in ("list", "retrieve", "qr"):
             return [DenyOperatorOrDirector()]
         return [IsAdmin()]
 
@@ -163,6 +168,37 @@ class BranchViewSet(viewsets.ModelViewSet):
                            "Отметьте его неактивным."},
                 status=409,
             )
+
+    @extend_schema(
+        parameters=[OpenApiParameter(
+            "fmt", OpenApiTypes.STR, enum=["svg", "png"],
+            description="Формат: svg (по умолчанию, вектор для печати) или png",
+        )],
+        responses=OpenApiTypes.BINARY,
+    )
+    @action(detail=True, methods=["get"])
+    def qr(self, request, pk=None):
+        """QR-код филиала: ведёт на публичную клиентскую страницу этого филиала
+        (``PUBLIC_SITE_URL/track?b=<id>``). Клиент сканирует его на баннере и,
+        не заходя в систему, сдаёт коды на склад. ECC уровня H — устойчив к
+        печати/затиранию. Возвращает SVG (по умолчанию) или PNG.
+
+        Параметр называется ``fmt``, а НЕ ``format``: последний перехватывает DRF
+        для выбора рендерера (?format=png → 404)."""
+        branch = self.get_object()
+        url = f"{settings.PUBLIC_SITE_URL.rstrip('/')}/track?b={branch.id}"
+        qr = segno.make(url, error="h")
+        fmt = (request.query_params.get("fmt") or "svg").lower()
+        buf = io.BytesIO()
+        if fmt == "png":
+            qr.save(buf, kind="png", scale=12, border=3, dark="#111111", light="#ffffff")
+            content_type, ext = "image/png", "png"
+        else:
+            qr.save(buf, kind="svg", scale=12, border=3, dark="#111111", light="#ffffff")
+            content_type, ext = "image/svg+xml", "svg"
+        resp = HttpResponse(buf.getvalue(), content_type=content_type)
+        resp["Content-Disposition"] = f'inline; filename="loko-qr-branch-{branch.id}.{ext}"'
+        return resp
 
 
 class ExpenseViewSet(viewsets.ModelViewSet):
