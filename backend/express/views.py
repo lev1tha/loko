@@ -3,9 +3,11 @@ from decimal import Decimal, InvalidOperation
 from django.db.models import Count, Q, Sum
 from django.utils import timezone
 from rest_framework import serializers, viewsets
-from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.decorators import action, api_view, permission_classes, throttle_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
+
+from loko.throttling import PublicReadThrottle, PublicWriteThrottle
 
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import (
@@ -653,6 +655,7 @@ class WarehouseItemViewSet(viewsets.ReadOnlyModelViewSet):
 @extend_schema(responses=OpenApiTypes.OBJECT, tags=["public"])
 @api_view(["GET"])
 @permission_classes([AllowAny])
+@throttle_classes([PublicReadThrottle])
 def public_branches(request):
     """Список филиалов для клиентской страницы (id/name активных). Публично."""
     qs = Branch.objects.filter(is_active=True).order_by("name")
@@ -662,6 +665,7 @@ def public_branches(request):
 @extend_schema(request=PublicIntakeSerializer, responses=OpenApiTypes.OBJECT, tags=["public"])
 @api_view(["POST"])
 @permission_classes([AllowAny])
+@throttle_classes([PublicWriteThrottle])
 def public_intake(request):
     """Самозапись клиента по QR: телефон + имя + коды → заявка складу (позиции «в поиске»).
 
@@ -689,8 +693,13 @@ def public_intake(request):
 )
 @api_view(["GET"])
 @permission_classes([AllowAny])
+@throttle_classes([PublicReadThrottle])
 def public_track(request):
-    """Трекинг по телефону: статусы/цены кодов клиента + бонус за вес. Публично."""
+    """Трекинг по телефону: статусы/цены кодов клиента + бонус за вес. Публично.
+
+    Throttled: the response reveals a client's name and parcels for any phone
+    number, so the per-IP ``public_read`` cap is what stops mass phone-number
+    enumeration from harvesting client data."""
     phone = Client.normalize_phone(request.query_params.get("phone"))
     if len(phone) < 6:
         return Response({"found": False, "reason": "no_phone"})
@@ -727,6 +736,7 @@ def public_track(request):
 @extend_schema(request=PublicRateSerializer, responses=OpenApiTypes.OBJECT, tags=["public"])
 @api_view(["POST"])
 @permission_classes([AllowAny])
+@throttle_classes([PublicWriteThrottle])
 def public_rate(request):
     """Клиент ставит звёзды сотруднику (1–5). Оценить можно только того, кто реально
     оприходовал груз этого клиента — иначе оценки можно было бы накрутить."""

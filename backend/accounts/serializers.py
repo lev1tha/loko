@@ -1,4 +1,6 @@
 from django.contrib.auth import get_user_model
+from django.contrib.auth.password_validation import validate_password as dj_validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
@@ -34,7 +36,9 @@ class UserSerializer(serializers.ModelSerializer):
 
 class UserCreateSerializer(serializers.ModelSerializer):
     # required=False — чтобы при правке (PUT/PATCH) можно было не менять пароль.
-    password = serializers.CharField(write_only=True, min_length=6, required=False)
+    # min_length=8 + validate_password (ниже) не дают завести слабый/угадываемый
+    # пароль, который потом переберут снаружи.
+    password = serializers.CharField(write_only=True, min_length=8, required=False)
 
     class Meta:
         model = User
@@ -49,6 +53,22 @@ class UserCreateSerializer(serializers.ModelSerializer):
             "branch",
             "password",
         )
+
+    def validate_password(self, value):
+        # Прогоняем пароль через политику Django (AUTH_PASSWORD_VALIDATORS):
+        # длина, распространённость, полностью числовой, схожесть с логином/именем.
+        # Иначе админ мог бы задать слабый пароль в обход всех валидаторов.
+        user = self.instance or User(
+            username=self.initial_data.get("username", ""),
+            first_name=self.initial_data.get("first_name", ""),
+            last_name=self.initial_data.get("last_name", ""),
+            email=self.initial_data.get("email", ""),
+        )
+        try:
+            dj_validate_password(value, user=user)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError(list(exc.messages))
+        return value
 
     def validate(self, attrs):
         # Направление обязательно для директора и игнорируется (очищается) у всех

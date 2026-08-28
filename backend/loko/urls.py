@@ -1,14 +1,17 @@
 from django.contrib import admin
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
-from rest_framework_simplejwt.views import TokenRefreshView
 from drf_spectacular.views import (
     SpectacularAPIView,
     SpectacularRedocView,
     SpectacularSwaggerView,
 )
 
-from accounts.views import LokoTokenObtainPairView, UserViewSet
+from accounts.views import (
+    LokoTokenObtainPairView,
+    LokoTokenRefreshView,
+    UserViewSet,
+)
 from business.views import DebtViewSet, DepositViewSet
 from express.views import (
     ClientPriceViewSet,
@@ -59,7 +62,7 @@ router.register("bonuses", EmployeeBonusViewSet, basename="bonus")
 api_urlpatterns = [
     # Auth (login is public)
     path("auth/login/", LokoTokenObtainPairView.as_view(), name="login"),
-    path("auth/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
+    path("auth/refresh/", LokoTokenRefreshView.as_view(), name="token_refresh"),
     # Публичные (клиентская QR-страница, без входа): филиалы, самозапись, трекинг.
     path("public/branches/", public_branches, name="public-branches"),
     path("public/intake/", public_intake, name="public-intake"),

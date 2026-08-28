@@ -1,9 +1,15 @@
+from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from rest_framework.test import APITestCase
 
 from finance.models import Branch
 
 User = get_user_model()
+
+# The configured per-IP login limit (e.g. "10/min") — read straight from settings
+# so the test tracks the real production value instead of hard-coding it.
+_LOGIN_LIMIT = int(settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["login"].split("/")[0])
 
 
 class DirectorAccessTests(APITestCase):
@@ -55,21 +61,21 @@ class UserManagementTests(APITestCase):
 
     def test_create_director_requires_module(self):
         r = self.client.post("/api/users/", {
-            "username": "d1", "role": "DIRECTOR", "password": "pass1234",
+            "username": "d1", "role": "DIRECTOR", "password": "Zx9!mfP2qL",
         }, format="json")
         self.assertEqual(r.status_code, 400)
         self.assertIn("module", r.data)
 
     def test_create_director_with_module(self):
         r = self.client.post("/api/users/", {
-            "username": "d2", "role": "DIRECTOR", "module": "EXPRESS", "password": "pass1234",
+            "username": "d2", "role": "DIRECTOR", "module": "EXPRESS", "password": "Zx9!mfP2qL",
         }, format="json")
         self.assertEqual(r.status_code, 201)
         self.assertEqual(User.objects.get(username="d2").module, "EXPRESS")
 
     def test_manager_module_cleared(self):
         r = self.client.post("/api/users/", {
-            "username": "m1", "role": "MANAGER", "module": "EXPRESS", "password": "pass1234",
+            "username": "m1", "role": "MANAGER", "module": "EXPRESS", "password": "Zx9!mfP2qL",
         }, format="json")
         self.assertEqual(r.status_code, 201)
         self.assertIsNone(User.objects.get(username="m1").module)
@@ -96,7 +102,7 @@ class BranchAssignmentTests(APITestCase):
     def _create(self, username, role):
         return self.client.post("/api/users/", {
             "username": username, "role": role,
-            "branch": self.branch.id, "password": "pass1234",
+            "branch": self.branch.id, "password": "Zx9!mfP2qL",
         }, format="json")
 
     def test_operator_keeps_branch(self):
@@ -123,3 +129,67 @@ class BranchAssignmentTests(APITestCase):
         self.assertEqual(r.status_code, 200, r.data)
         wh.refresh_from_db()
         self.assertEqual(wh.branch_id, self.branch.id)
+
+
+class PasswordPolicyTests(APITestCase):
+    """Слабые/угадываемые пароли отклоняются API создания пользователя, чтобы их
+    нельзя было перебрать снаружи (AUTH_PASSWORD_VALIDATORS через сериализатор)."""
+
+    def setUp(self):
+        self.admin = User.objects.create_user("admin_pw", password="pass1234", role=User.Role.ADMIN)
+        self.client.force_authenticate(self.admin)
+
+    def _create(self, password, username="newuser"):
+        return self.client.post("/api/users/", {
+            "username": username, "role": "MANAGER", "password": password,
+        }, format="json")
+
+    def test_short_password_rejected(self):
+        r = self._create("ab12cd")           # 6 символов < 8
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("password", r.data)
+
+    def test_all_numeric_password_rejected(self):
+        r = self._create("48213756")         # 8, но полностью числовой
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("password", r.data)
+
+    def test_common_password_rejected(self):
+        r = self._create("password")         # из списка распространённых
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("password", r.data)
+
+    def test_password_similar_to_username_rejected(self):
+        r = self._create("director1", username="director1")  # совпадает с логином
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("password", r.data)
+
+    def test_strong_password_accepted(self):
+        r = self._create("Zx9!mfP2qL")
+        self.assertEqual(r.status_code, 201, r.data)
+
+
+class LoginThrottleTests(APITestCase):
+    """Логин ограничен по частоте — защита от перебора паролей/credential stuffing."""
+
+    def setUp(self):
+        cache.clear()   # throttle state lives in the cache — isolate each test
+        User.objects.create_user("brute", password="Zx9!mfP2qL", role=User.Role.MANAGER)
+
+    def tearDown(self):
+        cache.clear()
+
+    def test_login_throttled_after_limit(self):
+        # Неверные пароли всё равно считаются: после лимита попыток с одного IP — 429.
+        codes = [
+            self.client.post("/api/auth/login/", {"username": "brute", "password": "wrong"}, format="json").status_code
+            for _ in range(_LOGIN_LIMIT + 1)
+        ]
+        self.assertEqual(codes.count(401), _LOGIN_LIMIT)  # лимит попыток исчерпан
+        self.assertEqual(codes[-1], 429)                  # следующая — отбита
+
+    def test_valid_login_returns_tokens(self):
+        r = self.client.post("/api/auth/login/", {"username": "brute", "password": "Zx9!mfP2qL"}, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertIn("access", r.data)
+        self.assertIn("refresh", r.data)

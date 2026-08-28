@@ -50,6 +50,9 @@ DJANGO_APPS = [
 THIRD_PARTY_APPS = [
     "rest_framework",
     "rest_framework_simplejwt",
+    # Token blacklist — lets rotated/revoked refresh tokens be invalidated
+    # server-side (see SIMPLE_JWT.BLACKLIST_AFTER_ROTATION below).
+    "rest_framework_simplejwt.token_blacklist",
     "drf_spectacular",
     "corsheaders",
 ]
@@ -122,9 +125,17 @@ else:
 # Custom user model with role-based access (Admin / Manager-Cashier)
 AUTH_USER_MODEL = "accounts.User"
 
+# Password strength — enforced by the user API (see accounts.serializers, which
+# calls django.contrib.auth.password_validation.validate_password) so weak,
+# guessable credentials can't be set and then brute-forced.
 AUTH_PASSWORD_VALIDATORS = [
-    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
+    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
+    {
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
+        "OPTIONS": {"min_length": 8},
+    },
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
+    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
 
 
@@ -186,6 +197,31 @@ REST_FRAMEWORK = {
     "DEFAULT_PAGINATION_CLASS": "loko.pagination.StandardPagination",
     "PAGE_SIZE": 50,
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    # Rate limiting — the primary defence against password brute-force /
+    # credential stuffing on login and against abuse of the public QR endpoints.
+    # Sensitive views set their own tighter scope (login/public_*); the global
+    # user/anon limits are generous so they never get in the app's way.
+    "DEFAULT_THROTTLE_CLASSES": (
+        "rest_framework.throttling.UserRateThrottle",
+        "rest_framework.throttling.AnonRateThrottle",
+    ),
+    "DEFAULT_THROTTLE_RATES": {
+        "user": "3000/min",       # authenticated app traffic (dashboards are chatty)
+        "anon": "60/min",         # stray anonymous requests
+        "login": "10/min",        # per client IP — slows password guessing
+        "public_read": "60/min",  # QR tracking / branch list (client polls ~1/7s)
+        "public_write": "20/min", # QR self-intake / rating (create operations)
+    },
+}
+
+# Cache backend — required by the throttling above. Local-memory is per-process
+# (so behind multiple gunicorn workers the limits are approximate) but needs no
+# extra infrastructure; swap in Redis/Memcached for exact global limits.
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "loko-throttle",
+    }
 }
 
 
@@ -228,7 +264,9 @@ SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(hours=8),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
     "ROTATE_REFRESH_TOKENS": True,
-    "BLACKLIST_AFTER_ROTATION": False,
+    # Each refresh rotates the token AND blacklists the previous one, so a stolen
+    # or leaked refresh token can't be replayed after the client next refreshes.
+    "BLACKLIST_AFTER_ROTATION": True,
     "AUTH_HEADER_TYPES": ("Bearer",),
 }
 

@@ -3,10 +3,11 @@ from rest_framework import serializers, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from drf_spectacular.utils import extend_schema, extend_schema_view, inline_serializer
 
+from loko.throttling import LoginRateThrottle
 from .permissions import IsAdmin
 from .serializers import (
     LokoTokenObtainPairSerializer,
@@ -34,9 +35,20 @@ User = get_user_model()
     )
 )
 class LokoTokenObtainPairView(TokenObtainPairView):
-    """Public login endpoint — issues access/refresh tokens + user payload."""
+    """Public login endpoint — issues access/refresh tokens + user payload.
+
+    Throttled per client IP (``login`` scope) to slow password brute-force and
+    credential stuffing against this open endpoint."""
 
     serializer_class = LokoTokenObtainPairSerializer
+    throttle_classes = [LoginRateThrottle]
+
+
+class LokoTokenRefreshView(TokenRefreshView):
+    """Refresh endpoint — same per-IP throttle so a leaked refresh token can't be
+    hammered, and rotation blacklists the previous token (see SIMPLE_JWT)."""
+
+    throttle_classes = [LoginRateThrottle]
 
 
 class UserViewSet(viewsets.ModelViewSet):
