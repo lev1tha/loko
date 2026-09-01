@@ -26,8 +26,8 @@ const fmt = (n) => new Intl.NumberFormat('ru-RU').format(Number(n) || 0)
 const kg = (n) => `${Number(n).toLocaleString('ru-RU')} кг`
 const som = (n) => `${fmt(Number(n).toFixed(2))} с`
 
-// Публичная клиентская страница (по QR, без входа). Клиент вводит телефон, сдаёт
-// коды на склад и следит за статусом/ценой. Ветку определяет ?b= из QR.
+// Публичная клиентская страница (по QR, без входа). Клиент вводит телефон, вписывает
+// коды посылок и следит за статусом/ценой. Ветку определяет ?b= из QR.
 export default function ClientApp() {
   const params = new URLSearchParams(window.location.search)
   const branchId = params.get('b') || ''
@@ -132,8 +132,8 @@ export default function ClientApp() {
         <div className="wrap">
           <section className="gate rise">
             <span className="kick">Отсканирован QR{branchName ? ` · ${short(branchName)}` : ''}</span>
-            <h1>Сдайте груз<br />за 10 секунд</h1>
-            <p className="subt">Войдите по номеру телефона — впишете коды, склад их примет, а вы копите бонусы.</p>
+            <h1>Заберите груз<br />без очереди</h1>
+            <p className="subt">Войдите по номеру телефона — впишите коды посылок, склад соберёт заказ, а вы заберёте без очереди.</p>
             <form className="gate-card" onSubmit={enter}>
               {error && <div className="err">{error}</div>}
               <div>
@@ -187,7 +187,7 @@ export default function ClientApp() {
         </section>
 
         <section className="sec rise">
-          <div className="sec-h"><h2>Сдать коды на склад</h2><span className="a">{codes.length}/{MAX}</span></div>
+          <div className="sec-h"><h2>Впишите коды посылок</h2><span className="a">{codes.length}/{MAX}</span></div>
           <div className="card" style={{ padding: 16 }}>
             {inputs.map((c, i) => (
               <div className="addrow" key={i}>
