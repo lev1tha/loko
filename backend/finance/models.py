@@ -161,6 +161,10 @@ class Account(models.Model):
         max_digits=10, decimal_places=4, null=True, blank=True,
         verbose_name="Курс начального остатка (CNY)",
     )
+    # Интеграция Kargo Osh: касса (`cards.pk_i_id`), из которой перенесён счёт.
+    legacy_kargo_card_id = models.IntegerField(
+        null=True, blank=True, unique=True, verbose_name="ID кассы в Kargo Osh",
+    )
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -288,6 +292,16 @@ class Branch(models.Model):
 
     name = models.CharField(max_length=160, unique=True, verbose_name="Название")
     address = models.CharField(max_length=255, blank=True, verbose_name="Адрес")
+    # Интеграция Kargo Osh: значение региона (`s_region`), из которого создан филиал.
+    legacy_kargo_region = models.CharField(
+        max_length=50, blank=True, verbose_name="Регион в Kargo Osh",
+    )
+    # Цена за 1 кг для заказов Kargo этого филиала (в Kargo — settings.price_<регион>,
+    # напр. 255 для одного региона при базовых 270). Пусто — цена из Настроек.
+    price_per_kg_som = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True,
+        verbose_name="Цена за кг (сом) для Kargo-заказов филиала",
+    )
     is_active = models.BooleanField(default=True, verbose_name="Активен")
     is_default = models.BooleanField(
         default=False, verbose_name="Филиал по умолчанию",

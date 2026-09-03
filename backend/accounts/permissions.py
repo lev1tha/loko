@@ -148,3 +148,51 @@ class WarehouseItemAccess(BasePermission):
         if _is_operator(user):
             return action in self.OPERATOR_ACTIONS
         return True  # Manager / Admin — полный доступ
+
+
+def _director_express(user) -> bool:
+    """Директор направления Express (склад существует только в Express)."""
+    return _is_director(user) and getattr(user, "module", None) == "EXPRESS"
+
+
+class WorkflowAccess(BasePermission):
+    """«Процесс работы» — прозрачность склада для директора: кто из сотрудников
+    какие заказы обрабатывает, сколько кг/сом, что осталось на вечерний допоиск.
+
+    * Admin / Manager — доступ.
+    * Director — только направление Express (у Business склада нет).
+    * Operator / Warehouse — нет (видят только своё через складской модуль).
+    """
+
+    message = "Недостаточно прав: раздел недоступен для этой роли."
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not (user and user.is_authenticated):
+            return False
+        if _is_operator(user) or _is_warehouse(user):
+            return False
+        if _is_director(user):
+            return _director_express(user)
+        return True
+
+
+class StockAccess(BasePermission):
+    """Остаток веса на складе (``WarehouseStock``).
+
+    Единственное место, где директор ПИШЕТ: он ежедневно вносит приход кг на
+    склад. Admin / Manager — тоже. Operator / Warehouse — нет. Удаление —
+    админ или автор записи (проверка в вьюсете).
+    """
+
+    message = "Недостаточно прав: раздел недоступен для этой роли."
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not (user and user.is_authenticated):
+            return False
+        if _is_operator(user) or _is_warehouse(user):
+            return False
+        if _is_director(user):
+            return _director_express(user)
+        return True

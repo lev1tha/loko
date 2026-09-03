@@ -14,6 +14,14 @@ def _money(value: Decimal) -> Decimal:
     return value.quantize(TWO_PLACES, rounding=ROUND_HALF_UP)
 
 
+class DeliveryStatus(models.TextChoices):
+    """Статус заказа Kargo Osh (``orders.i_status`` 1/2/3)."""
+
+    TRANSIT = "TRANSIT", "В пути"
+    ARRIVED = "ARRIVED", "На складе"
+    DELIVERED = "DELIVERED", "Отдан"
+
+
 class Sale(models.Model):
     """A Loko Express cargo sale.
 
@@ -94,6 +102,21 @@ class Sale(models.Model):
 
     date = models.DateField(verbose_name="Дата операции")
     payment_date = models.DateField(null=True, blank=True, verbose_name="Дата оплаты")
+    # --- интеграция Kargo Osh (миграция заказов) -----------------------------
+    tracking_number = models.CharField(
+        max_length=120, null=True, blank=True, unique=True, verbose_name="Трек-номер (Kargo)",
+    )
+    shipment_date = models.DateField(null=True, blank=True, verbose_name="Дата отгрузки (Kargo)")
+    arrival_date = models.DateField(null=True, blank=True, verbose_name="Дата прибытия на склад (Kargo)")
+    # Жизненный цикл заказа Kargo: в пути → на складе → отдан. NULL — продажа,
+    # созданная в Loko (склад/оператор): груз уже выдан клиенту.
+    delivery_status = models.CharField(
+        max_length=10, choices=DeliveryStatus.choices, null=True, blank=True,
+        db_index=True, verbose_name="Статус доставки (Kargo)",
+    )
+    legacy_kargo_id = models.IntegerField(
+        null=True, blank=True, unique=True, verbose_name="ID заказа в Kargo Osh",
+    )
     created_by = models.ForeignKey(
         dj_settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -406,6 +429,36 @@ class Client(models.Model):
 
     phone = models.CharField(max_length=32, unique=True, verbose_name="Телефон (канонический)")
     name = models.CharField(max_length=160, blank=True, verbose_name="Имя")
+    # --- поля из Kargo Osh (миграция; для новых Loko-клиентов пустые) ----------
+    code = models.CharField(
+        max_length=32, unique=True, null=True, blank=True, verbose_name="Код клиента",
+    )
+    last_name = models.CharField(max_length=120, blank=True, verbose_name="Фамилия")
+    email = models.EmailField(max_length=160, unique=True, null=True, blank=True)
+    # Хеш пароля. Из Kargo переносится как есть — это PHP-схема
+    # ``md5(md5(strrev(pw)) . "test_ort")`` (32 hex), проверка в ``express.kargo``.
+    # При первом успешном входе через API хеш прозрачно обновляется до
+    # стандартного Django (``make_password``). Логины клиентов не сбрасываются.
+    password_hash = models.CharField(
+        max_length=128, blank=True, verbose_name="Хеш пароля (из Kargo / Django)",
+    )
+    pass_code = models.CharField(max_length=100, blank=True, verbose_name="Код восстановления")
+    pass_date = models.DateTimeField(null=True, blank=True)
+    tg_id = models.CharField(max_length=100, blank=True, verbose_name="Telegram id")
+    branch = models.ForeignKey(
+        "finance.Branch", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="clients", verbose_name="Регион / филиал",
+    )
+    discount = models.CharField(
+        max_length=16, blank=True, verbose_name="Скидка (из Kargo, как есть)",
+    )
+    is_enabled = models.BooleanField(default=True, verbose_name="Активен")
+    reg_date = models.DateTimeField(null=True, blank=True, verbose_name="Дата регистрации (Kargo)")
+    access_date = models.DateTimeField(null=True, blank=True, verbose_name="Последний вход (Kargo)")
+    access_ip = models.CharField(max_length=45, blank=True)
+    legacy_kargo_id = models.IntegerField(
+        null=True, blank=True, unique=True, verbose_name="ID клиента в Kargo Osh",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -422,6 +475,15 @@ class Client(models.Model):
         """Канонический телефон — только цифры."""
         return "".join(ch for ch in str(raw or "") if ch.isdigit())
 
+    def check_password(self, raw_password) -> bool:
+        """Проверка пароля клиента (legacy-MD5 из Kargo или хеш Django)."""
+        from .kargo import check_client_password
+        return check_client_password(self, raw_password)
+
+    def set_password(self, raw_password):
+        from django.contrib.auth.hashers import make_password
+        self.password_hash = make_password(raw_password)
+
     @classmethod
     def get_or_register(cls, raw_phone, name=""):
         """Найти клиента по телефону или зарегистрировать. Имя дополняем, не затираем."""
@@ -434,6 +496,76 @@ class Client(models.Model):
             client.name = name
             client.save(update_fields=["name", "updated_at"])
         return client
+
+
+class WarehouseStock(models.Model):
+    """Учёт веса на складе филиала (ведёт директор).
+
+    Директор записывает, сколько кг пришло на склад за день (``INTAKE``), а
+    расход считается автоматически из продаж Loko этого филиала (вес, который
+    сотрудники указали при оприходовании). Остаток = Σ приходов − Σ веса продаж
+    с даты первой записи; переносится на следующий день (40 кг + 150 кг = 190 кг).
+    ``ADJUST`` — ручная корректировка до фактического остатка (может быть < 0).
+    """
+
+    class Kind(models.TextChoices):
+        INTAKE = "INTAKE", "Приход на склад"
+        ADJUST = "ADJUST", "Корректировка остатка"
+
+    branch = models.ForeignKey(
+        "finance.Branch", on_delete=models.PROTECT, related_name="stock_entries", verbose_name="Филиал",
+    )
+    date = models.DateField(verbose_name="Дата")
+    kind = models.CharField(max_length=8, choices=Kind.choices, default=Kind.INTAKE, verbose_name="Тип")
+    kg = models.DecimalField(max_digits=10, decimal_places=3, verbose_name="Вес (кг)")
+    note = models.CharField(max_length=255, blank=True, verbose_name="Комментарий")
+    created_by = models.ForeignKey(
+        dj_settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="stock_entries", verbose_name="Записал",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Приход на склад (кг)"
+        verbose_name_plural = "Приходы на склад (кг)"
+        ordering = ("-date", "-id")
+
+    def __str__(self) -> str:
+        return f"{self.branch} · {self.date} · {self.get_kind_display()} {self.kg} кг"
+
+
+class KargoSync(models.Model):
+    """Журнал синхронизаций с Kargo Osh (``import_kargoosh``).
+
+    Одна строка на запуск: режим, окно, счётчики и итог. Последняя успешная
+    запись задаёт нижнюю границу окна следующего инкрементального прогона.
+    """
+
+    class Mode(models.TextChoices):
+        FULL = "FULL", "Полный импорт"
+        INCREMENTAL = "INCREMENTAL", "Инкремент"
+        RESCAN = "RESCAN", "Полная сверка (upsert)"
+
+    mode = models.CharField(max_length=12, choices=Mode.choices)
+    since = models.DateTimeField(null=True, blank=True, verbose_name="Окно с")
+    started_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    ok = models.BooleanField(default=False)
+    dry_run = models.BooleanField(default=False)
+    stats = models.JSONField(default=dict, blank=True)
+    error = models.TextField(blank=True)
+
+    class Meta:
+        verbose_name = "Синхронизация Kargo"
+        verbose_name_plural = "Синхронизации Kargo"
+        ordering = ("-started_at",)
+
+    def __str__(self) -> str:
+        return f"{self.get_mode_display()} {self.started_at:%Y-%m-%d %H:%M} {'✓' if self.ok else '✗'}"
+
+    @classmethod
+    def last_successful(cls):
+        return cls.objects.filter(ok=True, dry_run=False).order_by("-started_at").first()
 
 
 class EmployeeRating(models.Model):

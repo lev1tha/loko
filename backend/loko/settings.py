@@ -211,6 +211,8 @@ REST_FRAMEWORK = {
         "login": "10/min",        # per client IP — slows password guessing
         "public_read": "60/min",  # QR tracking / branch list (client polls ~1/7s)
         "public_write": "20/min", # QR self-intake / rating (create operations)
+        "kargo": "1200/min",      # kargoosh.kg PHP backend → /api/kargo/ (one upstream IP)
+        "kargo_login": "10/min",  # per end-user (X-Kargo-Client-IP) — client login / reset
     },
 }
 
@@ -290,6 +292,11 @@ CSRF_TRUSTED_ORIGINS = config(
 # FRONTEND host (lokobooking.com), not the API host — it's what per-branch QR
 # codes point to. Override per environment; dev default is the Vite server.
 PUBLIC_SITE_URL = config("PUBLIC_SITE_URL", default="http://localhost:5174")
+
+# Интеграция с kargoosh.kg (PHP-фасад для клиентов): сервисный токен, который
+# PHP-бэкенд шлёт в заголовке X-Kargo-Token на /api/kargo/…. Пусто → все
+# эндпоинты /api/kargo/ закрыты (fail closed). Генерация: `openssl rand -hex 32`.
+KARGO_API_TOKEN = config("KARGO_API_TOKEN", default="")
 
 # ---------------------------------------------------------------------------
 # Production hardening — active behind Cloudflare (HTTPS terminated by CF).

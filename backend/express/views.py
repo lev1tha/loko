@@ -21,11 +21,14 @@ from accounts.permissions import (
     DenyOperatorOrDirector,
     IsAdmin,
     SalesAccess,
+    StockAccess,
     WarehouseAccess,
     WarehouseItemAccess,
+    WorkflowAccess,
 )
 from finance.models import Account, AppSettings, Branch
-from .models import Client, ClientPrice, EmployeeRating, Sale, WarehouseItem, WarehouseOrder
+from .models import Client, ClientPrice, EmployeeRating, Sale, WarehouseItem, WarehouseOrder, WarehouseStock
+from .workflow import build_stock, build_workflow
 from .serializers import (
     ClientPriceSerializer,
     ClientSerializer,
@@ -38,6 +41,7 @@ from .serializers import (
     WarehouseOrderSerializer,
     WarehouseReceiveSerializer,
     WarehouseStatusSerializer,
+    WarehouseStockSerializer,
 )
 
 ZERO = Decimal("0.00")
@@ -780,3 +784,84 @@ class ClientViewSet(viewsets.ReadOnlyModelViewSet):
                 cond |= Q(phone__icontains=digits)
             qs = qs.filter(cond)
         return qs
+
+
+# ---------------------------------------------------------------------------
+# Директор: «процесс работы» (прозрачность склада) и остаток веса на складе.
+# ---------------------------------------------------------------------------
+
+def _date_param(request, name):
+    from datetime import date as _date
+    raw = request.query_params.get(name)
+    if not raw:
+        return None
+    try:
+        return _date.fromisoformat(raw)
+    except ValueError:
+        raise serializers.ValidationError({name: "Ожидается дата YYYY-MM-DD."})
+
+
+@extend_schema(
+    parameters=[
+        OpenApiParameter("from", OpenApiTypes.DATE, description="Начало периода (по умолчанию сегодня)"),
+        OpenApiParameter("to", OpenApiTypes.DATE, description="Конец периода (по умолчанию сегодня)"),
+        OpenApiParameter("branch", OpenApiTypes.INT, description="Филиал (пусто — все)"),
+    ],
+    responses=OpenApiTypes.OBJECT, tags=["reports"],
+)
+@api_view(["GET"])
+@permission_classes([WorkflowAccess])
+def workflow_report(request):
+    """«Процесс работы» для директора: кто из сотрудников какие заказы обрабатывает
+    (заявки, оприходованные позиции, кг, сом, не найдено), что сейчас в работе и что
+    осталось на вечерний допоиск. Read-only."""
+    branch = request.query_params.get("branch") or None
+    return Response(build_workflow(_date_param(request, "from"), _date_param(request, "to"), int(branch) if branch else None))
+
+
+@extend_schema_view(
+    list=extend_schema(parameters=[OpenApiParameter("branch", OpenApiTypes.INT, description="Филиал")]),
+)
+class WarehouseStockViewSet(viewsets.ModelViewSet):
+    """Приходы веса на склад (кг) — ведёт директор; расход считается из продаж.
+
+    ``summary/?branch=`` — остаток, итоги и дневная лента (приход/расход/остаток)."""
+
+    serializer_class = WarehouseStockSerializer
+    permission_classes = [StockAccess]
+    http_method_names = ["get", "post", "delete", "head", "options"]
+
+    def get_queryset(self):
+        qs = WarehouseStock.objects.select_related("branch", "created_by")
+        branch = self.request.query_params.get("branch")
+        if branch:
+            qs = qs.filter(branch_id=branch)
+        return qs
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
+    def perform_destroy(self, instance):
+        user = self.request.user
+        if not (user.is_admin or instance.created_by_id == user.id):
+            raise serializers.ValidationError({"detail": "Удалить запись может её автор или администратор."})
+        instance.delete()
+
+    @extend_schema(parameters=[OpenApiParameter("branch", OpenApiTypes.INT, required=True)], responses=OpenApiTypes.OBJECT)
+    @action(detail=False, methods=["get"])
+    def summary(self, request):
+        """Остаток кг на складе филиала: Σ приходов − Σ веса продаж с первой записи."""
+        branch = request.query_params.get("branch")
+        if not branch:
+            b = Branch.resolve_default()
+            if b is None:
+                return Response(build_stock(None))
+            branch = b.id
+        return Response(build_stock(int(branch)))
+
+    @extend_schema(responses=OpenApiTypes.OBJECT)
+    @action(detail=False, methods=["get"])
+    def branches(self, request):
+        """Пикер филиалов для страницы остатка (директору обычные /branches/ закрыты)."""
+        qs = Branch.objects.filter(is_active=True).order_by("name")
+        return Response([{"id": b.id, "name": b.name, "is_default": b.is_default} for b in qs])

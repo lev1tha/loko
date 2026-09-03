@@ -18,6 +18,8 @@ import OperatorSale from './pages/OperatorSale'
 import OperatorMySales from './pages/OperatorMySales'
 import WarehouseLayout from './components/WarehouseLayout'
 import WarehouseDashboard from './pages/WarehouseDashboard'
+import Workflow from './pages/Workflow'
+import WarehouseStock from './pages/WarehouseStock'
 import Expenses from './pages/Expenses'
 import Accounts from './pages/Accounts'
 import Transfers from './pages/Transfers'
@@ -89,6 +91,8 @@ function AppRoutes() {
           }
         >
           <Route index element={<Reports lockedModule={directorModule} />} />
+          {directorModule === 'EXPRESS' && <Route path="workflow" element={<Workflow />} />}
+          {directorModule === 'EXPRESS' && <Route path="stock" element={<WarehouseStock />} />}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
@@ -133,6 +137,8 @@ function AppRoutes() {
         {/* Loko Express */}
         <Route path="sales" element={<Sales />} />
         <Route path="express/clients" element={<Clients />} />
+        <Route path="express/workflow" element={<Workflow />} />
+        <Route path="express/stock" element={<WarehouseStock />} />
         <Route path="express/client-prices" element={<ClientPrices />} />
         <Route path="express/other-income" element={<OtherIncome lockedModule="EXPRESS" />} />
         <Route path="express/expenses" element={<Expenses lockedModule="EXPRESS" />} />

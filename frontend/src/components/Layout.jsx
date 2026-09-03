@@ -31,6 +31,8 @@ const GROUPS = [
     items: [
       { to: '/sales', label: 'Продажи', icon: IconSales },
       { to: '/express/clients', label: 'Клиенты', icon: IconUsers },
+      { to: '/express/workflow', label: 'Процесс работы', icon: IconBox },
+      { to: '/express/stock', label: 'Остаток на складе', icon: IconBox },
       { to: '/express/client-prices', label: 'Цены клиентов', icon: IconAccounts },
       { to: '/express/other-income', label: 'Прочий доход', icon: IconSales },
       { to: '/express/expenses', label: 'Расходы', icon: IconExpense },

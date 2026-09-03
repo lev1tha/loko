@@ -269,6 +269,26 @@ docker compose exec db pg_dump -U lokobooking -p 5434 loko > ~/loko_$(date +%F).
 docker compose down                             # стоп (данные в томе pgdata сохраняются)
 ```
 
+## Интеграция с kargoosh.kg (мост Kargo → Loko)
+
+Пока PHP-сайт пишет в свой MySQL, Loko подтягивает его данные по cron
+(`import_kargoosh --incremental`: только upsert, ничего не удаляет). Переменные
+`KARGO_DB_*` и `KARGO_API_TOKEN` — в `infra/.env` (см. `.env.example`).
+
+```bash
+# Первый раз — полный импорт со сверкой (перед ним: бэкап MySQL Kargo!)
+cd /opt/loko/infra && docker compose exec backend python manage.py import_kargoosh --dry-run
+cd /opt/loko/infra && docker compose exec backend python manage.py import_kargoosh
+
+# Cron на хосте (crontab -e): инкремент каждые 5 минут, полная сверка ночью
+*/5 * * * *  cd /opt/loko/infra && docker compose exec -T backend python manage.py import_kargoosh --incremental >> /var/log/loko-kargo-sync.log 2>&1
+15 3 * * *   cd /opt/loko/infra && docker compose exec -T backend python manage.py import_kargoosh --rescan      >> /var/log/loko-kargo-sync.log 2>&1
+```
+
+Состояние последней синхронизации: `GET https://api.kargoosh.kg/api/kargo/sync/`
+(с заголовком `X-Kargo-Token`). Когда PHP переключён на запись через
+`/api/kargo/…` (см. `KARGO-API.md`) — cron выключить, иначе будет два мастера.
+
 ## Безопасность (чек-лист)
 
 - [ ] A-записи указывают на реальный IP сервера (`curl -4 ifconfig.me`).

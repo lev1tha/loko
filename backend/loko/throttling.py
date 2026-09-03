@@ -16,12 +16,17 @@ from rest_framework.throttling import AnonRateThrottle, SimpleRateThrottle
 
 
 def client_ip(request) -> str:
-    """Real client IP: Cloudflare's header, then the first X-Forwarded-For hop,
-    then the socket peer. See the module docstring for the trust assumptions."""
+    """Real client IP: Cloudflare's header, then nginx's X-Real-IP (set to the
+    true socket peer on the kargoosh.kg vhosts — not spoofable), then the first
+    X-Forwarded-For hop, then the socket peer. See the module docstring for the
+    trust assumptions."""
     meta = request.META
     cf = meta.get("HTTP_CF_CONNECTING_IP")
     if cf:
         return cf.strip()
+    real = meta.get("HTTP_X_REAL_IP")
+    if real:
+        return real.strip()
     forwarded = meta.get("HTTP_X_FORWARDED_FOR")
     if forwarded:
         return forwarded.split(",")[0].strip()
@@ -53,3 +58,27 @@ class PublicWriteThrottle(_ClientIPMixin, AnonRateThrottle):
     """QR client write endpoints (self-intake, rating) — creates data, tighter."""
 
     scope = "public_write"
+
+
+class KargoServiceThrottle(_ClientIPMixin, SimpleRateThrottle):
+    """Server-to-server calls from the kargoosh.kg PHP backend (token-authed).
+    Generous — one upstream IP serves every visitor of the public site."""
+
+    scope = "kargo"
+
+    def get_cache_key(self, request, view):
+        return self.cache_format % {"scope": self.scope, "ident": self.get_ident(request)}
+
+
+class KargoLoginThrottle(SimpleRateThrottle):
+    """Per END-USER cap on client login / password-reset attempts proxied by
+    the PHP site. The PHP backend forwards the visitor's address in
+    ``X-Kargo-Client-IP`` (its own IP would lump every visitor into one
+    bucket); without the header we fall back to the upstream IP so the limit
+    still applies."""
+
+    scope = "kargo_login"
+
+    def get_cache_key(self, request, view):
+        ident = (request.META.get("HTTP_X_KARGO_CLIENT_IP") or "").strip() or client_ip(request)
+        return self.cache_format % {"scope": self.scope, "ident": ident}

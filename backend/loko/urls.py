@@ -19,10 +19,12 @@ from express.views import (
     SaleViewSet,
     WarehouseItemViewSet,
     WarehouseOrderViewSet,
+    WarehouseStockViewSet,
     public_branches,
     public_intake,
     public_rate,
     public_track,
+    workflow_report,
 )
 from finance.views import (
     AccountViewSet,
@@ -55,6 +57,7 @@ router.register("client-prices", ClientPriceViewSet, basename="client-price")
 router.register("warehouse-orders", WarehouseOrderViewSet, basename="warehouse-order")
 router.register("warehouse-items", WarehouseItemViewSet, basename="warehouse-item")
 router.register("clients", ClientViewSet, basename="client")
+router.register("warehouse-stock", WarehouseStockViewSet, basename="warehouse-stock")
 router.register("deposits", DepositViewSet, basename="deposit")
 router.register("debts", DebtViewSet, basename="debt")
 router.register("bonuses", EmployeeBonusViewSet, basename="bonus")
@@ -68,6 +71,8 @@ api_urlpatterns = [
     path("public/intake/", public_intake, name="public-intake"),
     path("public/track/", public_track, name="public-track"),
     path("public/rate/", public_rate, name="public-rate"),
+    # Интеграция с kargoosh.kg (PHP-фасад, сервисный токен X-Kargo-Token).
+    path("kargo/", include("express.kargo_urls")),
     # Settings + reports
     path("settings/", AppSettingsView.as_view(), name="settings"),
     path("reports/pnl/", pnl_report, name="pnl"),
@@ -79,6 +84,7 @@ api_urlpatterns = [
     path("reports/journal/", journal_report, name="journal"),
     path("reports/breakdown/", breakdown_report, name="breakdown"),
     path("reports/bonuses/", bonuses_report, name="bonuses"),
+    path("reports/workflow/", workflow_report, name="workflow"),
     # OpenAPI schema + interactive docs (Swagger / Redoc)
     path("schema/", SpectacularAPIView.as_view(), name="schema"),
     path("docs/", SpectacularSwaggerView.as_view(url_name="api:schema"), name="swagger-ui"),

@@ -7,7 +7,7 @@ from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema_field
 
 from finance.models import Account, Branch
-from .models import Client, ClientPrice, Sale, WarehouseItem, WarehouseOrder
+from .models import WarehouseStock, Client, ClientPrice, Sale, WarehouseItem, WarehouseOrder
 
 
 class SaleSerializer(serializers.ModelSerializer):
@@ -319,3 +319,31 @@ class PublicRateSerializer(serializers.Serializer):
     phone = serializers.CharField(max_length=32)
     employee = serializers.IntegerField()
     stars = serializers.IntegerField(min_value=1, max_value=5)
+
+
+class WarehouseStockSerializer(serializers.ModelSerializer):
+    """Запись прихода/корректировки веса на складе филиала (ведёт директор)."""
+
+    branch_name = serializers.CharField(source="branch.name", read_only=True, default=None)
+    kind_display = serializers.CharField(source="get_kind_display", read_only=True)
+    created_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = WarehouseStock
+        fields = ("id", "branch", "branch_name", "date", "kind", "kind_display", "kg", "note",
+                  "created_by", "created_by_name", "created_at")
+        read_only_fields = ("created_by", "created_at")
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_created_by_name(self, obj):
+        u = obj.created_by
+        return (u.get_full_name() or u.username) if u else None
+
+    def validate(self, data):
+        kind = data.get("kind", WarehouseStock.Kind.INTAKE)
+        kg = data.get("kg")
+        if kind == WarehouseStock.Kind.INTAKE and (kg is None or kg <= 0):
+            raise serializers.ValidationError({"kg": "Приход должен быть больше нуля."})
+        if kind == WarehouseStock.Kind.ADJUST and (kg is None or kg == 0):
+            raise serializers.ValidationError({"kg": "Корректировка не может быть нулевой."})
+        return data

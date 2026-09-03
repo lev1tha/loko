@@ -33,3 +33,4 @@ sqlparse==0.5.5
 uritemplate==4.2.0
 urllib3==2.7.0
 whitenoise==6.12.0
+PyMySQL==1.1.1
