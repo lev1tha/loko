@@ -42,7 +42,8 @@ class Base(APITestCase):
 
 class WorkflowAccessTests(Base):
     def test_roles(self):
-        for user, code in ((self.admin, 200), (self.dir_ex, 200), (self.dir_bz, 403), (self.op, 403), (self.wh, 403)):
+        # директор любого направления видит процесс (директор видит оба направления)
+        for user, code in ((self.admin, 200), (self.dir_ex, 200), (self.dir_bz, 200), (self.op, 403), (self.wh, 403)):
             self.as_(user)
             self.assertEqual(self.client.get("/api/reports/workflow/").status_code, code, user.username)
         self.client.force_authenticate(None)
@@ -103,7 +104,7 @@ class StockTests(Base):
                                    branch=branch or self.b1, date=d or timezone.localdate(), **kw)
 
     def test_access(self):
-        for user, code in ((self.dir_ex, 200), (self.admin, 200), (self.dir_bz, 403), (self.op, 403), (self.wh, 200)):
+        for user, code in ((self.dir_ex, 200), (self.admin, 200), (self.dir_bz, 200), (self.op, 403), (self.wh, 200)):
             self.as_(user)
             self.assertEqual(self.client.get("/api/warehouse-stock/summary/", {"branch": self.b1.id}).status_code, code, user.username)
 

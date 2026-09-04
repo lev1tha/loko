@@ -3,9 +3,13 @@ import { Link } from 'react-router-dom'
 import { useFetch, asList } from '../lib/hooks'
 import { useAuth } from '../auth/AuthContext'
 import { money, num, today, firstOfMonth } from '../lib/format'
-import { Spinner } from '../components/ui'
+import { Segmented, Spinner } from '../components/ui'
 import '../director.css'
 
+const DIRECTIONS = [
+  { value: 'EXPRESS', label: 'Loko Express' },
+  { value: 'BUSINESS', label: 'Loko Business' },
+]
 const MONTH_SHORT = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек']
 
 function localISO(d) {
@@ -52,12 +56,14 @@ function Delta({ cur, prev, label }) {
 // месяцам, что требует внимания, сотрудники и склад. Всё read-only.
 export default function DirectorHome() {
   const { user } = useAuth()
-  const hasWarehouse = user?.module === 'EXPRESS'
-  const period = { from: firstOfMonth(), to: today() }
+  // Директор видит оба направления; своё — по умолчанию.
+  const [module, setModule] = useState(user?.module || 'EXPRESS')
+  const hasWarehouse = module === 'EXPRESS'
+  const period = { from: firstOfMonth(), to: today(), module }
   const pnl = useFetch('/reports/pnl/', period)
-  const pnlPrev = useFetch('/reports/pnl/', prevMonthRange())
+  const pnlPrev = useFetch('/reports/pnl/', { ...prevMonthRange(), module })
   const cash = useFetch('/reports/cashflow/', period)
-  const monthly = useFetch('/reports/monthly/', { from: monthsAgoFirst(5), to: today(), report: 'pnl' })
+  const monthly = useFetch('/reports/monthly/', { from: monthsAgoFirst(5), to: today(), report: 'pnl', module })
   const wf = useFetch(hasWarehouse ? '/reports/workflow/' : null, {})
   const branches = asList(useFetch(hasWarehouse ? '/warehouse-stock/branches/' : null).data)
   const [stock, setStock] = useState({})
@@ -72,6 +78,12 @@ export default function DirectorHome() {
 
   return (
     <div className="dir-page">
+      <div className="dir-page-head">
+        <p className="dir-page-sub">Направление</p>
+        <div className="dir-controls">
+          <Segmented value={module} onChange={setModule} options={DIRECTIONS} />
+        </div>
+      </div>
       <div className="dir-stats">
         <div className="dir-stat">
           <span className="label">Выручка с начала месяца</span>

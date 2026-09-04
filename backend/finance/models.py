@@ -353,11 +353,14 @@ class ExpenseArticle(models.TextChoices):
     EQUIPMENT = "EQUIPMENT", "Мебель / оборудование"
     REPAIR = "REPAIR", "Ремонт помещения"
     WAREHOUSE = "WAREHOUSE", "Строительство склада"
+    PURCHASE = "PURCHASE", "Закуп"
+    INVEST_OTHER = "INVEST_OTHER", "Прочее (инвестиционное)"
     # Финансовые
     LOAN_RECEIVED = "LOAN_RECEIVED", "Получение займа"
     OWNER_CONTRIB = "OWNER_CONTRIB", "Вклад собственника"
     LOAN_PRINCIPAL = "LOAN_PRINCIPAL", "Выплата займа (тело)"
     LOAN_INTEREST = "LOAN_INTEREST", "Выплата займа (проценты)"
+    SINGLE_TAX = "SINGLE_TAX", "Единый налог"
 
 
 # Обратная совместимость (старое имя enum).
@@ -370,11 +373,14 @@ OPERATING_ARTICLES = frozenset({
 })
 INVESTING_ARTICLES = frozenset({
     ExpenseArticle.EQUIPMENT, ExpenseArticle.REPAIR, ExpenseArticle.WAREHOUSE,
+    ExpenseArticle.PURCHASE, ExpenseArticle.INVEST_OTHER,
 })
 FINANCING_ARTICLES = frozenset({
     ExpenseArticle.LOAN_RECEIVED, ExpenseArticle.OWNER_CONTRIB,
-    ExpenseArticle.LOAN_PRINCIPAL, ExpenseArticle.LOAN_INTEREST,
+    ExpenseArticle.LOAN_PRINCIPAL, ExpenseArticle.LOAN_INTEREST, ExpenseArticle.SINGLE_TAX,
 })
+# Статьи, для которых комментарий обязателен («прочее» без пояснения бесполезно).
+COMMENT_REQUIRED_ARTICLES = frozenset({ExpenseArticle.OTHER, ExpenseArticle.INVEST_OTHER})
 # Финансовая деятельность делится на притоки и оттоки. Модель Expense хранит и те,
 # и другие; «приточные» статьи ниже трактуются как ПОСТУПЛЕНИЕ денег на счёт
 # (получение займа, вклад собственника), а не как отток. Остальные финансовые
@@ -383,7 +389,7 @@ FINANCING_INFLOW_ARTICLES = frozenset({
     ExpenseArticle.LOAN_RECEIVED, ExpenseArticle.OWNER_CONTRIB,
 })
 FINANCING_OUTFLOW_ARTICLES = frozenset({
-    ExpenseArticle.LOAN_PRINCIPAL, ExpenseArticle.LOAN_INTEREST,
+    ExpenseArticle.LOAN_PRINCIPAL, ExpenseArticle.LOAN_INTEREST, ExpenseArticle.SINGLE_TAX,
 })
 
 
@@ -443,6 +449,11 @@ class Expense(models.Model):
         max_digits=10, decimal_places=4, null=True, blank=True, verbose_name="Курс юаня (снапшот)"
     )
     description = models.CharField(max_length=500, blank=True, verbose_name="Комментарий")
+    # Кому выплачена зарплата (статья «ФОТ»): директор указывает, кому и сколько.
+    employee = models.ForeignKey(
+        dj_settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="salary_expenses", verbose_name="Сотрудник (зарплата)",
+    )
     date = models.DateField(verbose_name="Дата операции")
     payment_date = models.DateField(null=True, blank=True, verbose_name="Дата оплаты")
     created_by = models.ForeignKey(

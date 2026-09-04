@@ -38,12 +38,12 @@ const MONTHLY_ROWS = {
   ],
 }
 
-export default function Reports({ lockedModule = null }) {
+export default function Reports({ lockedModule = null, initialModule = 'all' }) {
   const [from, setFrom] = useState(firstOfMonth())
   const [to, setTo] = useState(today())
   const [payment, setPayment] = useState('all')
   const [report, setReport] = useState('pnl')
-  const [moduleState, setModule] = useState('all')
+  const [moduleState, setModule] = useState(initialModule)
   const [taxRate, setTaxRate] = useState('')
   const [opening, setOpening] = useState('')
   const [view, setView] = useState('period') // 'period' | 'monthly'

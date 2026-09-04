@@ -7,7 +7,7 @@ from django.core.cache import cache
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
-from express.models import WarehouseItem, WarehouseOrder
+from express.models import Sale, WarehouseItem, WarehouseOrder
 from finance.models import Account, AppSettings, Branch
 
 User = get_user_model()
@@ -121,3 +121,41 @@ class MinePeriodTests(Base):
         self.assertEqual(codes(self.client.get("/api/warehouse-items/mine/")), ["NEW"])
         self.assertEqual(codes(self.client.get("/api/warehouse-items/mine/", {"period": "prev"})), ["OLD"])
         self.assertEqual(codes(self.client.get("/api/warehouse-items/mine/", {"period": "all"})), ["NEW", "OLD"])
+
+
+class AssignCommandTests(Base):
+    def _client_order(self, branch, code, receive=False):
+        o = WarehouseOrder.objects.create(branch=branch, client_codes=[code])
+        it = WarehouseItem.objects.create(order=o, client_code=code)
+        if receive:
+            it.receive("1", self.acc, by_user=self.wh1)
+        return o, it
+
+    def test_assigns_single_operator_branches_and_their_sales(self):
+        from io import StringIO
+        from django.core.management import call_command
+        o1, it1 = self._client_order(self.b1, "A1", receive=True)
+        o2, it2 = self._client_order(self.b1, "A2")
+        Sale.objects.filter(pk=it1.sale_id).update(created_by=None)
+        out = StringIO()
+        call_command("assign_client_orders", "--dry-run", stdout=out)
+        o1.refresh_from_db(); self.assertIsNone(o1.created_by)          # dry-run ничего не пишет
+        call_command("assign_client_orders", stdout=out)
+        o1.refresh_from_db(); o2.refresh_from_db()
+        self.assertEqual((o1.created_by, o2.created_by), (self.op1, self.op1))
+        self.assertEqual(Sale.objects.get(pk=it1.sale_id).created_by, self.op1)
+        self.assertIn("Закреплено заявок: 2, продаж: 1", out.getvalue())
+
+    def test_ambiguous_branch_skipped_unless_forced(self):
+        from io import StringIO
+        from django.core.management import call_command
+        User.objects.create_user("op1b", password="x", role=User.Role.OPERATOR, branch=self.b1)
+        o, it = self._client_order(self.b1, "B1")
+        out = StringIO()
+        call_command("assign_client_orders", stdout=out)
+        o.refresh_from_db(); self.assertIsNone(o.created_by)
+        self.assertIn("пропущено", out.getvalue())
+        call_command("assign_client_orders", "--branch", str(self.b1.id), "--operator", "op1b", stdout=out)
+        o.refresh_from_db(); self.assertEqual(o.created_by.username, "op1b")
+        with self.assertRaises(Exception):
+            call_command("assign_client_orders", "--branch", str(self.b1.id), "--operator", "op2", stdout=out)  # другой филиал

@@ -148,6 +148,21 @@ docker compose exec backend python manage.py import_kargoosh
 
 Повторный запуск полного импорта безопасен (идемпотентен по `legacy_kargo_*`), но не нужен: дальше работает инкремент.
 
+## Шаг 5а. Закрепить старые заявки клиентов за сотрудниками
+
+До этого выката заявки, созданные клиентами по QR, оставались без сотрудника, и их продажи никому не засчитывались. Один раз после выката:
+
+```bash
+docker compose exec backend python manage.py assign_client_orders --dry-run   # что изменится
+docker compose exec backend python manage.py assign_client_orders             # филиалы с одним сотрудником — автоматически
+```
+
+Филиалы, где сотрудников несколько или нет, команда пропустит и перечислит. Для них решает владелец, кому засчитать:
+
+```bash
+docker compose exec backend python manage.py assign_client_orders --branch <id> --operator <логин>
+```
+
 ## Шаг 6. Cron
 
 `crontab -e` под root на хосте:

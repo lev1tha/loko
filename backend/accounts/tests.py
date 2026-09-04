@@ -25,7 +25,7 @@ class DirectorAccessTests(APITestCase):
 
     def test_director_blocked_from_data_endpoints(self):
         self.client.force_authenticate(self.dir_ex)
-        for url in ("/api/expenses/", "/api/accounts/", "/api/reports/balances/",
+        for url in ("/api/accounts/", "/api/reports/balances/",
                     "/api/reports/journal/", "/api/deposits/", "/api/settings/",
                     "/api/sales/"):
             self.assertEqual(self.client.get(url).status_code, 403, url)
@@ -36,13 +36,16 @@ class DirectorAccessTests(APITestCase):
                     "/api/reports/monthly/", "/api/reports/breakdown/?line=opex"):
             self.assertEqual(self.client.get(url).status_code, 200, url)
 
-    def test_director_module_is_forced(self):
-        # Директор Express, даже прося module=BUSINESS, получает свой раздел.
+    def test_director_sees_both_directions(self):
+        # Директор видит оба направления: без параметра — своё, с ?module= — любое.
         self.client.force_authenticate(self.dir_ex)
+        r = self.client.get("/api/reports/pnl/?from=2020-01-01&to=2030-01-01")
+        self.assertEqual(r.status_code, 200)
         r = self.client.get("/api/reports/pnl/?module=BUSINESS&from=2020-01-01&to=2030-01-01")
         self.assertEqual(r.status_code, 200)
-        # deposit_revenue (Business) не должен «протечь» директору Express.
-        self.assertEqual(r.data["deposit_revenue"], 0)
+        self.assertIn("deposit_revenue", r.data)
+        r = self.client.get("/api/reports/pnl/?module=all&from=2020-01-01&to=2030-01-01")
+        self.assertEqual(r.status_code, 200)
 
     def test_director_can_read_own_profile(self):
         self.client.force_authenticate(self.dir_bz)

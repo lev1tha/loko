@@ -35,12 +35,15 @@ export const ARTICLES_BY_CAT = {
     { value: 'EQUIPMENT', label: 'Мебель / оборудование' },
     { value: 'REPAIR', label: 'Ремонт помещения' },
     { value: 'WAREHOUSE', label: 'Строительство склада' },
+    { value: 'PURCHASE', label: 'Закуп' },
+    { value: 'INVEST_OTHER', label: 'Прочее (инвестиционное)' },
   ],
   FINANCING: [
     { value: 'LOAN_RECEIVED', label: 'Получение займа' },
     { value: 'OWNER_CONTRIB', label: 'Вклад собственника' },
     { value: 'LOAN_PRINCIPAL', label: 'Выплата займа (тело)' },
     { value: 'LOAN_INTEREST', label: 'Выплата займа (проценты)' },
+    { value: 'SINGLE_TAX', label: 'Единый налог' },
   ],
 }
 export const OPEX_ARTICLES = ARTICLES_BY_CAT.OPEX
@@ -229,7 +232,7 @@ function ExpenseForm({ editing, accounts, onClose, onSaved }) {
 
   const articles = ARTICLES_BY_CAT[category] || null
   const articleIsInflow = category === 'FINANCING' && FIN_INFLOW_ARTICLES.includes(article)
-  const commentRequired = category === 'OPEX' && article === 'OTHER'
+  const commentRequired = (category === 'OPEX' && article === 'OTHER') || (category === 'INVEST' && article === 'INVEST_OTHER')
   const acc = accounts.find((a) => String(a.id) === String(accountId))
 
   function changeCategory(newCat) {

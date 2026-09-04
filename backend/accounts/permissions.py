@@ -151,8 +151,8 @@ class WarehouseItemAccess(BasePermission):
 
 
 def _director_express(user) -> bool:
-    """Директор направления Express (склад существует только в Express)."""
-    return _is_director(user) and getattr(user, "module", None) == "EXPRESS"
+    """Директор — любой: он видит оба направления, склад относится к Express."""
+    return _is_director(user)
 
 
 class WorkflowAccess(BasePermission):
@@ -198,4 +198,25 @@ class StockAccess(BasePermission):
             return getattr(view, "action", None) == "summary"
         if _is_director(user):
             return _director_express(user)
+        return True
+
+
+class DirectorEntryAccess(BasePermission):
+    """Доходы и расходы: кассир/админ — полный доступ; директор — вносит и смотрит
+    операции СВОЕГО направления (страницы «Доход» / «Расход» в кабинете),
+    удалить может только свою запись (проверка в вьюсете). Operator / Warehouse — нет.
+    """
+
+    message = "Недостаточно прав: раздел недоступен для этой роли."
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not (user and user.is_authenticated):
+            return False
+        if _is_operator(user) or _is_warehouse(user):
+            return False
+        if _is_director(user):
+            return getattr(view, "action", None) in {
+                "list", "retrieve", "create", "destroy", "accounts", "employees",
+            }
         return True

@@ -7,8 +7,8 @@ from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from .models import (
-    Account, AppSettings, Branch, Currency, EmployeeBonus, Expense, ExpenseArticle,
-    ExpenseCategory, FINANCING_ARTICLES, INVESTING_ARTICLES, OPERATING_ARTICLES,
+    Account, AppSettings, Branch, COMMENT_REQUIRED_ARTICLES, Currency, EmployeeBonus, Expense,
+    ExpenseArticle, ExpenseCategory, FINANCING_ARTICLES, INVESTING_ARTICLES, OPERATING_ARTICLES,
     OtherIncome, Transfer,
 )
 
@@ -88,6 +88,7 @@ class ExpenseSerializer(serializers.ModelSerializer):
     account_name = serializers.CharField(source="account.name", read_only=True)
     account_currency = serializers.CharField(source="account.currency", read_only=True)
     branch_name = serializers.CharField(source="branch.name", read_only=True, default=None)
+    employee_name = serializers.SerializerMethodField()
     payable = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
     # Суммы, приведённые к сому по СНАПШОТ-курсу операции (юань × зафикс. курс).
     amount_kgs = serializers.SerializerMethodField()
@@ -105,6 +106,11 @@ class ExpenseSerializer(serializers.ModelSerializer):
     @extend_schema_field(_KGS_FIELD)
     def get_payable_kgs(self, obj):
         return obj.kgs_payable
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_employee_name(self, obj):
+        u = obj.employee
+        return (u.get_full_name() or u.username) if u else None
 
     class Meta:
         model = Expense
@@ -126,6 +132,8 @@ class ExpenseSerializer(serializers.ModelSerializer):
             "paid_amount_kgs", # оплата в сомах
             "payable_kgs",     # кредиторка в сомах
             "description",
+            "employee",        # кому (зарплата)
+            "employee_name",
             "date",            # дата операции (ОПиУ)
             "payment_date",    # дата оплаты (ОДДС)
             "created_at",
@@ -134,6 +142,7 @@ class ExpenseSerializer(serializers.ModelSerializer):
         extra_kwargs = {
             "paid_amount": {"required": False},
             "payment_date": {"required": False},
+            "employee": {"required": False, "allow_null": True},
         }
 
     def validate_amount(self, value):
@@ -175,14 +184,17 @@ class ExpenseSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {"opex_article": "Статья не соответствует выбранной категории."}
                 )
-            # «Прочие расходы» → комментарий строго обязателен.
-            if article == ExpenseArticle.OTHER and not (description or "").strip():
+            # «Прочие расходы» / «Прочее (инвестиционное)» → комментарий строго обязателен.
+            if article in COMMENT_REQUIRED_ARTICLES and not (description or "").strip():
                 raise serializers.ValidationError(
-                    {"description": "Для «Прочих расходов» комментарий обязателен."}
+                    {"description": "Для статьи «Прочее» комментарий обязателен: что именно оплачено."}
                 )
         else:
             # Категории без детализации (Себест./Поставщик/Изъятие/Другое).
             attrs["opex_article"] = None
+        # Сотрудник имеет смысл только для зарплаты.
+        if attrs.get("employee") and article != ExpenseArticle.PAYROLL:
+            attrs["employee"] = None
         return attrs
 
 

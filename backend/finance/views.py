@@ -5,7 +5,7 @@ import segno
 from django.conf import settings
 from django.db.models import ProtectedError
 from django.http import HttpResponse
-from rest_framework import viewsets
+from rest_framework import serializers, viewsets
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -13,7 +13,7 @@ from rest_framework.views import APIView
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 
-from accounts.permissions import DenyOperator, DenyOperatorOrDirector, IsAdmin
+from accounts.permissions import DenyOperator, DenyOperatorOrDirector, DirectorEntryAccess, IsAdmin
 from .bonuses import build_bonuses
 from .models import Account, AppSettings, Branch, EmployeeBonus, Expense, OtherIncome, Transfer
 from .reports import (
@@ -47,13 +47,16 @@ def _period_params(request):
 
 
 def _scoped_module(request):
-    """Направление отчёта. Для директора жёстко фиксируется его направлением
-    (защита на сервере — клиент не может попросить чужой раздел)."""
+    """Направление отчёта. Директор видит оба направления: ``?module=`` берётся как
+    есть, без параметра — его направление по умолчанию (``user.module``), а
+    ``module=all`` — сводно."""
     user = request.user
+    raw = request.query_params.get("module") or None
     if getattr(user, "is_director", False):
-        # Директор без направления не видит ничего (служебный «нет данных»).
-        return user.module or "__none__"
-    return request.query_params.get("module") or None
+        if raw == "all":
+            return None
+        return raw or user.module or None
+    return raw
 
 
 def _scoped_branch(request):
@@ -201,16 +204,36 @@ class BranchViewSet(viewsets.ModelViewSet):
         return resp
 
 
+def _director_module(request):
+    """Направление для списков директора: ``?module=`` (EXPRESS/BUSINESS/all), иначе
+    его направление по умолчанию. Для остальных ролей — None (фильтр не навязываем)."""
+    user = request.user
+    if not getattr(user, "is_director", False):
+        return None
+    raw = request.query_params.get("module") or None
+    if raw == "all":
+        return None
+    return raw or user.module or None
+
+
+def _check_director_owner(request, instance):
+    if getattr(request.user, "is_director", False) and instance.created_by_id != request.user.id:
+        raise serializers.ValidationError({"detail": "Директор может удалить только свою запись."})
+
+
 class ExpenseViewSet(viewsets.ModelViewSet):
+    """Расходы. Директор (страница «Расход» в кабинете) вносит расходы своего
+    направления и удаляет свои; полный CRUD — кассир/админ."""
+
     serializer_class = ExpenseSerializer
-    permission_classes = [DenyOperatorOrDirector]
+    permission_classes = [DirectorEntryAccess]
 
     def get_queryset(self):
-        qs = Expense.objects.select_related("account").all()
+        qs = Expense.objects.select_related("account", "employee").all()
         date_from, date_to, _ = _period_params(self.request)
         category = self.request.query_params.get("category")
         account = self.request.query_params.get("account")
-        module = self.request.query_params.get("module")
+        module = _director_module(self.request) or self.request.query_params.get("module")
         branch = self.request.query_params.get("branch")
         if date_from:
             qs = qs.filter(date__gte=date_from)
@@ -220,7 +243,7 @@ class ExpenseViewSet(viewsets.ModelViewSet):
             qs = qs.filter(category=category)
         if account:
             qs = qs.filter(account_id=account)
-        if module:
+        if module and module != "all":
             qs = qs.filter(account__module=module)
         if branch:
             qs = qs.filter(branch=branch)
@@ -229,22 +252,50 @@ class ExpenseViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
 
+    def perform_destroy(self, instance):
+        _check_director_owner(self.request, instance)
+        instance.delete()
+
+    @extend_schema(responses=OpenApiTypes.OBJECT)
+    @action(detail=False, methods=["get"])
+    def accounts(self, request):
+        """Пикер счёта для форм дохода/расхода: id, название, вид, валюта — без
+        остатков (директору балансы не показываем). Директор — только своё направление."""
+        qs = Account.objects.filter(is_active=True)
+        module = _director_module(request) or request.query_params.get("module")
+        if module and module != "all":
+            qs = qs.filter(module=module)
+        return Response([{"id": a.id, "name": a.name, "kind": a.kind, "currency": a.currency, "module": a.module}
+                         for a in qs.order_by("module", "kind", "name")])
+
+    @extend_schema(responses=OpenApiTypes.OBJECT)
+    @action(detail=False, methods=["get"])
+    def employees(self, request):
+        """Пикер «кому» для зарплаты: активные пользователи (без админов-суперпользователей)."""
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        qs = User.objects.filter(is_active=True, is_superuser=False).order_by("first_name", "last_name", "username")
+        return Response([{"id": u.id, "name": u.get_full_name() or u.username, "role": u.get_role_display(),
+                          "branch": u.branch.name if u.branch_id else None} for u in qs])
+
 
 class OtherIncomeViewSet(viewsets.ModelViewSet):
+    """Прочие доходы. Директор (страница «Доход») вносит доходы своего направления."""
+
     serializer_class = OtherIncomeSerializer
-    permission_classes = [DenyOperatorOrDirector]
+    permission_classes = [DirectorEntryAccess]
 
     def get_queryset(self):
         qs = OtherIncome.objects.select_related("account").all()
         date_from, date_to, _ = _period_params(self.request)
-        module = self.request.query_params.get("module")
+        module = _director_module(self.request) or self.request.query_params.get("module")
         account = self.request.query_params.get("account")
         branch = self.request.query_params.get("branch")
         if date_from:
             qs = qs.filter(date__gte=date_from)
         if date_to:
             qs = qs.filter(date__lte=date_to)
-        if module:
+        if module and module != "all":
             qs = qs.filter(account__module=module)
         if account:
             qs = qs.filter(account_id=account)
@@ -254,6 +305,10 @@ class OtherIncomeViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
+
+    def perform_destroy(self, instance):
+        _check_director_owner(self.request, instance)
+        instance.delete()
 
 
 class TransferViewSet(viewsets.ModelViewSet):
