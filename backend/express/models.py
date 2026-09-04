@@ -301,10 +301,15 @@ class WarehouseOrder(models.Model):
         "Client", on_delete=models.SET_NULL, null=True, blank=True,
         related_name="orders", verbose_name="Клиент",
     )
+    # Сотрудник, за которым закреплена заявка: он видит её в «Моих продажах» и ему
+    # засчитывается продажа. Оператор создаёт заявку сам; заявка клиента (QR) при
+    # приёме закрепляется за единственным сотрудником филиала автоматически, а если
+    # сотрудников несколько — складовщик выбирает при оприходовании. Пусто — ещё
+    # никому не закреплена (заявка от клиента, ``client`` заполнен).
     created_by = models.ForeignKey(
         dj_settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True,
         related_name="warehouse_orders_created",
-        verbose_name="Создал (оператор/менеджер; пусто — самим клиентом)",
+        verbose_name="Сотрудник (кому засчитывается)",
     )
     assigned_to = models.ForeignKey(
         dj_settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
@@ -333,6 +338,27 @@ class WarehouseOrder(models.Model):
 
     def can_transition_to(self, new_status: str) -> bool:
         return new_status in self.TRANSITIONS.get(self.status, set())
+
+    @staticmethod
+    def branch_operators(branch):
+        """Активные сотрудники («Сотрудник») филиала."""
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        if branch is None:
+            return User.objects.none()
+        return User.objects.filter(role=User.Role.OPERATOR, is_active=True, branch=branch).order_by("first_name", "username")
+
+    @classmethod
+    def resolve_operator(cls, branch):
+        """Единственный сотрудник филиала — иначе None (нужен явный выбор)."""
+        ops = list(cls.branch_operators(branch)[:2])
+        return ops[0] if len(ops) == 1 else None
+
+    def assign_operator(self, operator):
+        """Закрепить заявку за сотрудником (только если ещё не закреплена)."""
+        if self.created_by_id is None and operator is not None:
+            self.created_by = operator
+            self.save(update_fields=["created_by", "updated_at"])
 
 
 class WarehouseItem(models.Model):

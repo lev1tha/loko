@@ -133,7 +133,7 @@ class WarehouseItemAccess(BasePermission):
 
     message = "Недостаточно прав для позиций склада."
 
-    WAREHOUSE_ACTIONS = {"list", "retrieve", "receive", "not_found", "deliver", "accounts"}
+    WAREHOUSE_ACTIONS = {"list", "retrieve", "receive", "not_found", "deliver", "accounts", "operators"}
     OPERATOR_ACTIONS = {"mine", "to_evening"}
 
     def has_permission(self, request, view):

@@ -1,5 +1,7 @@
 from decimal import Decimal
 
+from django.contrib.auth import get_user_model
+
 from django.db.models import Sum
 from rest_framework import serializers
 
@@ -168,7 +170,9 @@ class WarehouseItemSerializer(serializers.ModelSerializer):
 
     status_display = serializers.CharField(source="get_status_display", read_only=True)
     order_id = serializers.IntegerField(source="order.id", read_only=True)
+    branch = serializers.IntegerField(source="order.branch_id", read_only=True)
     branch_name = serializers.CharField(source="order.branch.name", read_only=True, default=None)
+    created_by = serializers.IntegerField(source="order.created_by_id", read_only=True, default=None)
     created_by_name = serializers.CharField(source="order.created_by.username", read_only=True, default=None)
     price_som = serializers.SerializerMethodField()
 
@@ -176,7 +180,7 @@ class WarehouseItemSerializer(serializers.ModelSerializer):
         model = WarehouseItem
         fields = (
             "id", "order_id", "client_code", "status", "status_display",
-            "weight_kg", "price_som", "reason", "branch_name", "created_by_name",
+            "weight_kg", "price_som", "reason", "branch", "branch_name", "created_by", "created_by_name",
             "created_at", "updated_at",
         )
         read_only_fields = fields
@@ -240,6 +244,10 @@ class WarehouseReceiveSerializer(serializers.Serializer):
         queryset=Account.objects.filter(module="EXPRESS", currency="KGS", is_active=True),
     )
     tracking_number = serializers.CharField(max_length=120, required=False, allow_blank=True, default="")
+    # Кому засчитать заявку клиента (QR), если она ещё ни за кем не закреплена.
+    operator = serializers.PrimaryKeyRelatedField(
+        queryset=get_user_model().objects.filter(is_active=True), required=False, allow_null=True,
+    )
 
     def validate_tracking_number(self, value):
         value = (value or "").strip()

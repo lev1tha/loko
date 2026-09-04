@@ -1,11 +1,17 @@
 import { useCallback, useEffect, useState } from 'react'
 import api, { errorMessage } from '../api/client'
 import { som, kg } from '../lib/format'
-import { Alert } from '../components/ui'
+import { Alert, Segmented } from '../components/ui'
 import { LoadingTruck } from '../components/states'
 
 // Позиции найдены и оприходованы складом (в чеке клиента, с суммой).
 const FOUND = new Set(['FOUND', 'DELIVERED'])
+const PERIODS = [
+  { value: 'month', label: 'Этот месяц' },
+  { value: 'prev', label: 'Прошлый' },
+  { value: 'all', label: 'Всё время' },
+]
+const PERIOD_LABEL = { month: 'За текущий месяц', prev: 'За прошлый месяц', all: 'За всё время' }
 
 // Страница роли «Сотрудник»: свои позиции (коды) за текущий месяц с подсветкой
 // статуса склада. 🟢 найдено (вес + сумма) · 🔴 не найдено (можно убрать из чека
@@ -15,18 +21,19 @@ export default function OperatorMySales() {
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId] = useState(null)
   const [error, setError] = useState('')
+  const [period, setPeriod] = useState('month') // month | prev | all
 
   const load = useCallback(() => {
     setLoading(true)
     api
-      .get('/warehouse-items/mine/')
+      .get('/warehouse-items/mine/', { params: { period } })
       .then((res) => setData(res.data))
       .catch((err) => {
         setError(errorMessage(err))
         setData({ count: 0, results: [] })
       })
       .finally(() => setLoading(false))
-  }, [])
+  }, [period])
 
   useEffect(() => {
     load()
@@ -60,10 +67,11 @@ export default function OperatorMySales() {
         <div>
           <h2 className="card-title">Мои продажи</h2>
           <p className="muted operator-sales-sub">
-            За текущий месяц
+            {PERIOD_LABEL[period]}
             {rows.length > 0 && ` · ${rows.length} позиций · к оплате ${som(totalFound)}`}
           </p>
         </div>
+        <Segmented value={period} onChange={setPeriod} options={PERIODS} />
       </div>
 
       {error && <Alert kind="error">{error}</Alert>}

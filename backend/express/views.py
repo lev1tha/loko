@@ -594,6 +594,18 @@ class WarehouseItemViewSet(viewsets.ReadOnlyModelViewSet):
             raise serializers.ValidationError({"status": "Позиция уже оприходована."})
         ser = WarehouseReceiveSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
+        # Заявка клиента (QR) ещё никому не закреплена — закрепляем за сотрудником
+        # филиала: единственным автоматически, иначе тем, кого выбрал складовщик.
+        order = item.order
+        if order.created_by_id is None:
+            operator = ser.validated_data.get("operator") or WarehouseOrder.resolve_operator(order.branch)
+            if operator is None:
+                raise serializers.ValidationError(
+                    {"operator": "Выберите сотрудника, кому засчитать заявку клиента."}
+                )
+            if not (getattr(operator, "is_operator", False) and operator.branch_id == order.branch_id):
+                raise serializers.ValidationError({"operator": "Сотрудник должен быть из филиала заявки."})
+            order.assign_operator(operator)
         item.receive(
             ser.validated_data["weight_kg"], ser.validated_data["account"], by_user=request.user,
             tracking_number=ser.validated_data.get("tracking_number") or None,
@@ -626,23 +638,44 @@ class WarehouseItemViewSet(viewsets.ReadOnlyModelViewSet):
         item.send_to_evening()
         return Response(WarehouseItemSerializer(item).data)
 
-    @extend_schema(responses=OpenApiTypes.OBJECT)
+    @extend_schema(
+        parameters=[OpenApiParameter("period", OpenApiTypes.STR, enum=["month", "prev", "all"],
+                                     description="Период: текущий месяц (по умолчанию), прошлый месяц, всё время")],
+        responses=OpenApiTypes.OBJECT,
+    )
     @action(detail=False, methods=["get"])
     def mine(self, request):
-        """Свои позиции сотрудника за текущий месяц (для «Мои продажи»).
+        """Свои позиции сотрудника (для «Мои продажи»): текущий месяц по умолчанию,
+        ``?period=prev`` — прошлый месяц, ``?period=all`` — всё время.
 
         Показывает статус каждого кода: в поиске / найдено (вес + сумма) / не найдено /
         вечерний допоиск. Сумма берётся с созданной при оприходовании продажи."""
         now_local = timezone.localtime(timezone.now())
         month_start = now_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        qs = (
-            WarehouseItem.objects
-            .filter(order__created_by=request.user, created_at__gte=month_start)
-            .select_related("order", "order__branch", "order__created_by", "sale")
-            .order_by("-created_at", "-id")
-        )
+        period = request.query_params.get("period", "month")
+        qs = WarehouseItem.objects.filter(order__created_by=request.user)
+        if period == "prev":
+            prev_start = (month_start - timezone.timedelta(days=1)).replace(day=1)
+            qs = qs.filter(created_at__gte=prev_start, created_at__lt=month_start)
+        elif period != "all":
+            qs = qs.filter(created_at__gte=month_start)
+        qs = qs.select_related("order", "order__branch", "order__created_by", "sale").order_by("-created_at", "-id")
         data = WarehouseItemSerializer(qs, many=True).data
-        return Response({"count": qs.count(), "results": data})
+        return Response({"count": qs.count(), "period": period, "results": data})
+
+    @extend_schema(parameters=[OpenApiParameter("branch", OpenApiTypes.INT)], responses=OpenApiTypes.OBJECT)
+    @action(detail=False, methods=["get"])
+    def operators(self, request):
+        """Сотрудники филиала — пикер «кому засчитать» для заявок клиента (QR).
+        Складовщик получает свой филиал; менеджер/админ — ``?branch=``."""
+        user = request.user
+        if getattr(user, "is_warehouse", False):
+            branch = user.branch
+        else:
+            raw = request.query_params.get("branch")
+            branch = Branch.objects.filter(pk=raw).first() if raw else None
+        qs = WarehouseOrder.branch_operators(branch)
+        return Response([{"id": u.id, "name": u.get_full_name() or u.username} for u in qs])
 
     @extend_schema(responses=OpenApiTypes.OBJECT)
     @action(detail=False, methods=["get"])
@@ -682,8 +715,10 @@ def public_intake(request):
     ser.is_valid(raise_exception=True)
     d = ser.validated_data
     client = Client.get_or_register(d["phone"], d.get("name", ""))
+    # Заявка сразу закрепляется за сотрудником филиала, если он один: он увидит коды
+    # в «Моих продажах» ещё до оприходования. Иначе выбор — на складе при приёме.
     order = WarehouseOrder.objects.create(
-        branch=d["branch"], client=client,
+        branch=d["branch"], client=client, created_by=WarehouseOrder.resolve_operator(d["branch"]),
         status=WarehouseOrder.Status.NEW, client_codes=d["client_codes"],
     )
     for code in d["client_codes"]:

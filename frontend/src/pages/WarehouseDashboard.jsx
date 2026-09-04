@@ -33,6 +33,9 @@ export default function WarehouseDashboard() {
   const [weight, setWeight] = useState('')
   const [accountId, setAccountId] = useState('')
   const [tracking, setTracking] = useState('')
+  // Заявка клиента (QR) без сотрудника: кому засчитать — сотрудники филиала заявки.
+  const [operators, setOperators] = useState([])
+  const [operatorId, setOperatorId] = useState('')
 
   const dayParams = useMemo(
     () => ({ active_items: 1, ...(search.trim() ? { search: search.trim() } : {}) }),
@@ -59,6 +62,17 @@ export default function WarehouseDashboard() {
     setReceiveItem(item)
     setWeight('')
     setTracking('')
+    setOperators([])
+    setOperatorId('')
+    if (!item.created_by) {
+      api.get('/warehouse-items/operators/', { params: isWarehouse ? {} : { branch: item.branch } })
+        .then((res) => {
+          const list = res.data || []
+          setOperators(list)
+          if (list.length === 1) setOperatorId(String(list[0].id))
+        })
+        .catch(() => setOperators([]))
+    }
     const def = accounts.find((a) => a.kind === 'CASH') || accounts[0]
     setAccountId(def ? String(def.id) : '')
   }
@@ -68,11 +82,13 @@ export default function WarehouseDashboard() {
     if (!receiveItem) return
     if (!(parseFloat(weight) > 0)) { setError('Укажите вес больше нуля.'); return }
     if (!accountId) { setError('Выберите счёт зачисления.'); return }
+    if (!receiveItem.created_by && !operatorId) { setError('Выберите сотрудника, кому засчитать заявку клиента.'); return }
     setBusyId(receiveItem.id)
     setError('')
     try {
       await api.post(`/warehouse-items/${receiveItem.id}/receive/`, {
         weight_kg: weight, account: accountId, tracking_number: tracking.trim(),
+        ...(operatorId ? { operator: operatorId } : {}),
       })
       setReceiveItem(null)
       dayReq.reload(); eveningReq.reload()
@@ -203,6 +219,20 @@ export default function WarehouseDashboard() {
               placeholder="5" autoFocus
             />
           </Field>
+          {!receiveItem.created_by && (
+            <Field label="Кому засчитать" hint="Заявка пришла от клиента по QR — закрепите за сотрудником филиала">
+              {operators.length ? (
+                <select className="select" value={operatorId} onChange={(e) => setOperatorId(e.target.value)}>
+                  <option value="">Выберите сотрудника…</option>
+                  {operators.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                </select>
+              ) : (
+                <div className="caption" style={{ color: 'var(--error)' }}>
+                  В этом филиале нет сотрудников с ролью «Сотрудник». Добавьте их в «Пользователи» и привяжите к филиалу.
+                </div>
+              )}
+            </Field>
+          )}
           <Field label="Трек-номер посылки" hint="Необязательно. Клиент увидит его в кабинете kargoosh.kg">
             <input
               className="input" value={tracking} onChange={(e) => setTracking(e.target.value)}
@@ -234,7 +264,9 @@ function OrderCard({ order, showBranch, ...itemProps }) {
         {showBranch && order.branch_name && (
           <span className="wh-item-branch">{shortBranch(order.branch_name)}</span>
         )}
-        {order.created_by_name && <span className="muted">🧑 {order.created_by_name}</span>}
+        {order.created_by_name
+          ? <span className="muted">🧑 {order.created_by_name}</span>
+          : <span className="wh-item-branch" title="Заявка от клиента по QR, сотрудник ещё не закреплён">от клиента · без сотрудника</span>}
       </div>
       <div className="wh-items">
         {items.map((it) => (
