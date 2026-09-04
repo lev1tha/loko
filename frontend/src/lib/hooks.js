@@ -11,6 +11,11 @@ export function useFetch(url, params) {
 
   const reload = useCallback(() => {
     let active = true
+    // url === null → запрос не нужен (например, раздел недоступен роли).
+    if (!url) {
+      setLoading(false)
+      return () => {}
+    }
     setLoading(true)
     api
       .get(url, { params })

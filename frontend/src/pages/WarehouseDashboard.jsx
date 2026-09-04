@@ -40,6 +40,8 @@ export default function WarehouseDashboard() {
   const dayReq = useFetch('/warehouse-orders/', dayParams)
   const eveningReq = useFetch('/warehouse-items/', { status: 'EVENING' })
   const accounts = asList(useFetch('/warehouse-items/accounts/').data)
+  // Остаток веса на складе своего филиала (ведёт директор) — только чтение.
+  const stock = useFetch(isWarehouse && userBranchName ? '/warehouse-stock/summary/' : null, {})
 
   const orders = asList(dayReq.data)
   const evening = asList(eveningReq.data)
@@ -118,6 +120,12 @@ export default function WarehouseDashboard() {
           <p className="muted" style={{ margin: '2px 0 0' }}>
             {isWarehouse ? 'Заявки вашего филиала' : 'Все филиалы'} · обновляется автоматически
           </p>
+          {stock.data?.since && (
+            <p style={{ margin: '6px 0 0', fontSize: 14 }}>
+              На складе сейчас: <strong>{kg(stock.data.balance_kg)}</strong>
+              <span className="muted"> · учёт с {stock.data.since.split('-').reverse().join('.')}</span>
+            </p>
+          )}
         </div>
         <div className="row gap-sm wh-head-actions">
           <input

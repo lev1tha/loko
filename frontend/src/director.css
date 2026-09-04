@@ -1,0 +1,154 @@
+/* =========================================================================
+   Страницы директора (Сводка, Процесс работы, Остаток на складе).
+   Те же токены, что во всей системе; здесь только композиция:
+   шапка страницы с контролами, ряд показателей, панели с таблицами.
+   ========================================================================= */
+.dir-page {
+  --dir-ink: var(--ink);
+  --dir-body: var(--body);
+  --dir-muted: var(--muted);
+  --dir-line: var(--hairline);
+  --dir-card: var(--canvas);
+  --dir-canvas: var(--surface-soft);
+  --dir-signal: #d97706;          /* внимание: янтарный */
+  --dir-signal-soft: #fef3c7;
+  --dir-ledger: var(--success);   /* деньги в плюсе */
+  --dir-ledger-soft: #d1fae5;
+
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-lg);
+}
+.dir-page-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 16px 32px;
+  flex-wrap: wrap;
+}
+.dir-page-sub { margin: 0; font-size: 14px; color: var(--dir-muted); max-width: 60ch; line-height: 1.45; }
+.dir-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.dir-controls .select, .dir-controls .input { width: auto; min-width: 0; }
+.dir-controls .select { min-width: 200px; max-width: 320px; }
+.dir-controls .input[type='date'] { width: 150px; }
+.dir-controls .segmented { flex: none; }
+
+/* Ряд показателей */
+.dir-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr)); gap: var(--s-md); }
+.dir-hero { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr); gap: var(--s-md); }
+@media (max-width: 760px) { .dir-hero { grid-template-columns: 1fr; } }
+.dir-stat {
+  background: var(--dir-card);
+  border: 1px solid var(--dir-line);
+  border-radius: var(--r-lg);
+  padding: var(--s-lg);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.dir-stat .label { font-size: 13px; font-weight: 500; color: var(--dir-muted); }
+.dir-stat .value {
+  font-size: clamp(22px, 2.2vw, 30px);
+  font-weight: 600;
+  line-height: 1.15;
+  color: var(--dir-ink);
+  letter-spacing: var(--display-tracking);
+  font-variant-numeric: tabular-nums;
+}
+.dir-stat.hero .value { font-size: clamp(30px, 3.2vw, 42px); }
+.dir-stat .value.ledger { color: var(--dir-ledger); }
+.dir-stat .value.signal { color: var(--dir-signal); }
+.dir-stat .sub { font-size: 13px; color: var(--muted-soft); }
+.dir-stat .delta { font-size: 13px; font-weight: 600; }
+.dir-stat .delta.up { color: var(--dir-ledger); }
+.dir-stat .delta.down { color: var(--error); }
+.dir-stat .delta.flat { color: var(--dir-muted); font-weight: 500; }
+
+/* Панели */
+.dir-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr)); gap: var(--s-md); align-items: start; }
+.dir-cols.wide-left { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); }
+@media (max-width: 1000px) { .dir-cols.wide-left { grid-template-columns: 1fr; } }
+.dir-panel {
+  background: var(--dir-card);
+  border: 1px solid var(--dir-line);
+  border-radius: var(--r-lg);
+  padding: var(--s-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-sm);
+  min-width: 0;
+}
+.dir-panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.dir-panel-head h3 { font-size: 16px; font-weight: 600; color: var(--dir-ink); margin: 0; }
+.dir-panel-head span, .dir-panel-head a { font-size: 13px; color: var(--dir-muted); font-weight: 500; }
+.dir-panel-head a:hover { color: var(--dir-ink); }
+.dir-panel .table { min-width: 0; font-size: 14px; }
+.dir-panel .table th { font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--dir-muted); padding: 8px 10px; border-bottom: 1px solid var(--dir-line); }
+.dir-panel .table td { padding: 11px 10px; border-bottom: 1px solid var(--hairline-soft); vertical-align: middle; }
+.dir-panel .table tr:last-child td { border-bottom: 0; }
+.dir-panel .table td.num, .dir-panel .table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.dir-panel .table td:first-child, .dir-panel .table th:first-child { padding-left: 0; }
+.dir-panel .table td:last-child, .dir-panel .table th:last-child { padding-right: 0; }
+.dir-panel .empty { padding: 28px 8px; font-size: 14px; color: var(--dir-muted); text-align: center; }
+.dir-panel .positive { color: var(--dir-ledger); }
+.dir-panel .negative { color: var(--dir-signal); }
+.dir-note { font-size: 13px; color: var(--dir-muted); margin: 0; }
+
+/* Требует внимания */
+.dir-alerts { display: flex; flex-direction: column; gap: 8px; }
+.dir-alert {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px; border-radius: var(--r-md);
+  background: var(--dir-signal-soft); color: var(--dir-ink); font-size: 14px; font-weight: 500;
+}
+.dir-alert:hover { filter: brightness(0.97); }
+.dir-alert .count { min-width: 28px; height: 28px; padding: 0 8px; border-radius: 999px; background: var(--dir-signal); color: #fff; font-weight: 700; font-size: 13px; display: inline-flex; align-items: center; justify-content: center; }
+.dir-alert .arrow { margin-left: auto; color: var(--dir-muted); }
+.dir-alert.ok { background: var(--dir-ledger-soft); }
+.dir-alert.ok .count { background: var(--dir-ledger); }
+
+/* График по месяцам (SVG) */
+.dir-chart { width: 100%; height: auto; display: block; }
+.dir-chart text { font-family: var(--font-sans); font-size: 11px; fill: var(--muted); }
+.dir-chart .grid line { stroke: var(--hairline); }
+.dir-chart .bar-rev { fill: var(--ink); opacity: 0.85; }
+.dir-chart .bar-net { fill: var(--success); }
+.dir-chart .bar-neg { fill: var(--error); }
+.dir-legend { display: flex; gap: 16px; font-size: 12px; color: var(--muted); }
+.dir-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+
+/* Вкладки */
+.dir-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--dir-line); }
+.dir-tab {
+  appearance: none; background: none; border: 0; border-bottom: 2px solid transparent;
+  padding: 10px 14px; margin-bottom: -1px;
+  font: inherit; font-size: 14px; font-weight: 600; color: var(--dir-muted); cursor: pointer;
+  display: inline-flex; align-items: center; gap: 8px;
+}
+.dir-tab:hover { color: var(--dir-ink); }
+.dir-tab.active { color: var(--dir-ink); border-bottom-color: var(--dir-ink); }
+.dir-tab:focus-visible { outline: 2px solid var(--dir-ink); outline-offset: -2px; border-radius: 6px; }
+.dir-nav-count {
+  min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px;
+  background: var(--dir-signal); color: #fff; font-size: 11px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+
+/* Список заявок «в работе» / вечерний допоиск */
+.dir-orders { display: flex; flex-direction: column; gap: var(--s-sm); }
+.dir-order { padding: 16px 20px; gap: 10px; }
+.dir-order-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 13px; color: var(--dir-muted); }
+.dir-order-head .id { font-weight: 700; color: var(--dir-ink); }
+.dir-order-head .when { margin-left: auto; }
+.dir-items { display: flex; flex-direction: column; }
+.dir-item { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 9px 0; border-top: 1px solid var(--hairline-soft); flex-wrap: wrap; }
+.dir-item:first-child { border-top: 0; }
+.dir-item-main { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
+.dir-code { font-family: ui-monospace, Menlo, monospace; font-weight: 700; color: var(--dir-ink); font-size: 14px; }
+.dir-chip { font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 999px; background: var(--surface-card); color: var(--dir-muted); }
+.dir-chip.found, .dir-chip.delivered { background: var(--dir-ledger-soft); color: #047857; }
+.dir-chip.evening, .dir-chip.not_found { background: var(--dir-signal-soft); color: #b45309; }
+.dir-item .reason { font-size: 13px; color: var(--dir-muted); }
+.dir-item .fin { font-variant-numeric: tabular-nums; font-size: 14px; color: var(--dir-ink); white-space: nowrap; }
+.dir-item .fin small { color: var(--dir-muted); margin-right: 8px; }

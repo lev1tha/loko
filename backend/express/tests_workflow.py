@@ -103,9 +103,20 @@ class StockTests(Base):
                                    branch=branch or self.b1, date=d or timezone.localdate(), **kw)
 
     def test_access(self):
-        for user, code in ((self.dir_ex, 200), (self.admin, 200), (self.dir_bz, 403), (self.op, 403), (self.wh, 403)):
+        for user, code in ((self.dir_ex, 200), (self.admin, 200), (self.dir_bz, 403), (self.op, 403), (self.wh, 200)):
             self.as_(user)
             self.assertEqual(self.client.get("/api/warehouse-stock/summary/", {"branch": self.b1.id}).status_code, code, user.username)
+
+    def test_warehouse_sees_only_own_branch_summary(self):
+        WarehouseStock.objects.create(branch=self.b2, date=timezone.localdate(), kg=Decimal("50"))
+        self.as_(self.wh)  # филиал b1
+        r = self.client.get("/api/warehouse-stock/summary/", {"branch": self.b2.id})
+        self.assertEqual((r.status_code, r.data["branch"], r.data["balance_kg"]), (200, self.b1.id, "0.000"))
+        self.assertEqual(self.client.get("/api/warehouse-stock/").status_code, 403)
+        self.assertEqual(self.client.post("/api/warehouse-stock/", {"branch": self.b1.id, "date": str(timezone.localdate()), "kg": "1"}, format="json").status_code, 403)
+        self.wh.branch = None
+        self.wh.save()
+        self.assertEqual(self.client.get("/api/warehouse-stock/summary/").status_code, 400)
 
     def test_balance_carries_over(self):
         today = timezone.localdate()

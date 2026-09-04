@@ -112,15 +112,17 @@ const TITLES = {
   '/guide': ['Инструкция', 'Как пользоваться системой — для администраторов'],
 }
 
-export default function Layout() {
+// groups/titles/brand можно переопределить (кабинет директора использует ту же
+// оболочку со своим набором разделов).
+export default function Layout({ groups: groupsProp, titles: titlesProp, brand }) {
   const { user, logout, isAdmin } = useAuth()
   const [open, setOpen] = useState(false)
   const location = useLocation()
-  const [title, sub] = TITLES[location.pathname] || ['Loko ERP', '']
+  const [title, sub] = (titlesProp || TITLES)[location.pathname] || ['Loko ERP', '']
   const initials = (user?.username || '?').slice(0, 2).toUpperCase()
   const close = () => setOpen(false)
 
-  const groups = isAdmin ? [...GROUPS, ADMIN_GROUP, HELP_GROUP] : GROUPS
+  const groups = groupsProp || (isAdmin ? [...GROUPS, ADMIN_GROUP, HELP_GROUP] : GROUPS)
 
   return (
     <div className="app-shell">
@@ -130,8 +132,8 @@ export default function Layout() {
         <div className="sidebar-brand">
           <div className="brand-mark">L</div>
           <div className="brand-text">
-            <strong>Loko ERP</strong>
-            <span>Express · Business</span>
+            <strong>{brand?.title || 'Loko ERP'}</strong>
+            <span>{brand?.sub || 'Express · Business'}</span>
           </div>
         </div>
 

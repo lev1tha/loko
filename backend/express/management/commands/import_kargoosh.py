@@ -20,6 +20,10 @@ timestamp'ов в источнике); заказы — новые (``pk_i_id`` 
 ``--rescan``. Каждый запуск пишется в ``express.KargoSync`` (виден в
 ``GET /api/kargo/sync/``).
 
+Кассы → счета: ``initial_balance`` = баланс кассы − оплаты перенесённых заказов
+этого счёта (баланс кассы уже включает эти оплаты, а Loko считает их притоком
+ОДДС — иначе двойной счёт). Итог: остаток счёта в Loko = балансу кассы Kargo.
+
 Пароли: хеш из Kargo (MD5) переносится как есть; если в Loko хеш уже
 обновлён до формата Django (клиент входил через API) — не трогаем.
 
@@ -181,14 +185,16 @@ class Command(BaseCommand):
         card_acc = self._import_accounts(create_only=False)
         self._upsert_clients(regions)
         self._import_orders_full(admin_branch, card_acc)
+        self._settle_accounts(card_acc.values())
 
     def _wipe_legacy(self):
-        # Порядок: продажи (FK PROTECT на счёт/филиал) → счета → клиенты → филиалы.
+        """Удаляем только перенесённые продажи и клиентов. Счета и филиалы Kargo
+        оставляем: на них уже могут ссылаться продажи, созданные в Loko через
+        /api/kargo/ (FK PROTECT), а импорт всё равно переиспользует их по
+        legacy-ключам и заново сводит начальные остатки."""
         n_s = Sale.objects.filter(legacy_kargo_id__isnull=False).delete()[0]
         n_c = Client.objects.filter(legacy_kargo_id__isnull=False).delete()[0]
-        n_a = Account.objects.filter(legacy_kargo_card_id__isnull=False).delete()[0]
-        n_b = Branch.objects.exclude(legacy_kargo_region="").delete()[0]
-        self.stdout.write(f"  очищены прежние legacy-строки: sale={n_s} client={n_c} account={n_a} branch={n_b}")
+        self.stdout.write(f"  очищены прежние legacy-строки: sale={n_s} client={n_c}")
 
     # ---------------------------------------------------------- upsert mode
     def _run_upsert(self, since):
@@ -196,6 +202,10 @@ class Command(BaseCommand):
         card_acc = self._import_accounts(create_only=True)
         self._upsert_clients(regions)
         self._upsert_orders(admin_branch, card_acc, since)
+        # Начальный остаток фиксируем только у счетов, созданных в этом прогоне:
+        # у прежних он заморожен на момент полного импорта, а новые оплаты — уже
+        # настоящие притоки.
+        self._settle_accounts(self.new_accounts)
 
     # ---------------------------------------------------------------- layers
     def _import_branches(self):
@@ -231,6 +241,7 @@ class Command(BaseCommand):
         уже приходят в Loko через paid_som, иначе посчитали бы дважды."""
         card_acc = {a.legacy_kargo_card_id: a for a in Account.objects.filter(legacy_kargo_card_id__isnull=False)}
         created = 0
+        self.new_accounts = []
         for c in self._q("SELECT pk_i_id, s_name, s_for, i_amount, s_currency FROM cards"):
             if c["pk_i_id"] in card_acc:
                 continue
@@ -241,10 +252,30 @@ class Command(BaseCommand):
                 initial_balance=_d(c["i_amount"]), legacy_kargo_card_id=c["pk_i_id"],
             )
             card_acc[c["pk_i_id"]] = acc
+            self.new_accounts.append(acc)
             created += 1
         self.stdout.write(f"  счета из касс: {len(card_acc)} (+{created} новых)")
         self.stats["accounts_created"] = created
         return card_acc
+
+    def _settle_accounts(self, accounts):
+        """Начальный остаток счёта = баланс кассы Kargo − оплаты по перенесённым
+        заказам этого счёта. Баланс кассы (``cards.i_amount``) УЖЕ содержит эти
+        оплаты, а Loko считает их притоком ОДДС по ``paid_som`` — без вычета
+        деньги считались бы дважды. После этого остаток счёта в Loko = текущему
+        балансу кассы в Kargo."""
+        accounts = list(accounts)
+        if not accounts:
+            return
+        amounts = {c["pk_i_id"]: _d(c["i_amount"]) for c in self._q("SELECT pk_i_id, i_amount FROM cards")}
+        paid = dict(
+            Sale.objects.filter(legacy_kargo_id__isnull=False, account__in=accounts)
+            .values_list("account_id").annotate(s=Sum("paid_som")).values_list("account_id", "s")
+        )
+        for acc in accounts:
+            acc.initial_balance = amounts.get(acc.legacy_kargo_card_id, ZERO) - (paid.get(acc.id) or ZERO)
+        Account.objects.bulk_update(accounts, ["initial_balance"])
+        self.stdout.write(f"  начальные остатки счетов сведены с кассами: {len(accounts)}")
 
     def _client_fields(self, u, regions, phone_hint):
         code = (u["s_code"] or "").strip() or None
@@ -435,7 +466,9 @@ class Command(BaseCommand):
         s = Sale.objects.filter(legacy_kargo_id__isnull=False).aggregate(
             n=Count("id"), som=Sum("price_som"), kg=Sum("weight_kg"))
         cl = Client.objects.filter(legacy_kargo_id__isnull=False).count()
-        acc_kargo = Account.objects.filter(legacy_kargo_card_id__isnull=False, module="EXPRESS").aggregate(s=Sum("initial_balance"))["s"] or ZERO
+        kargo_accs = Account.objects.filter(legacy_kargo_card_id__isnull=False, module="EXPRESS")
+        acc_kargo = (kargo_accs.aggregate(s=Sum("initial_balance"))["s"] or ZERO) + (
+            Sale.objects.filter(legacy_kargo_id__isnull=False, account__in=kargo_accs).aggregate(s=Sum("paid_som"))["s"] or ZERO)
         all_ok = True
 
         def line(name, src, dst, money=False):
@@ -452,6 +485,6 @@ class Command(BaseCommand):
         line("заказы (кол-во)", base["orders"], s["n"] or 0)
         line("заказы Σ сом", base["orders_som"], s["som"] or ZERO, money=True)
         line("заказы Σ кг", base["orders_kg"], s["kg"] or ZERO, money=True)
-        line("кассы карго Σ баланс", base["cards_kargo"], acc_kargo, money=True)
+        line("кассы карго Σ баланс", base["cards_kargo"], acc_kargo, money=True)  # = нач. остаток + оплаты
         self.stdout.write(f"  ⧗ транзакции ({base['transactions']}) — финжурнал следующим проходом")
         return all_ok

@@ -851,6 +851,12 @@ class WarehouseStockViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["get"])
     def summary(self, request):
         """Остаток кг на складе филиала: Σ приходов − Σ веса продаж с первой записи."""
+        user = request.user
+        if getattr(user, "is_warehouse", False):
+            # Складовщик видит только свой филиал, параметр игнорируется.
+            if not user.branch_id:
+                raise serializers.ValidationError({"branch": "Вам не назначен филиал."})
+            return Response(build_stock(user.branch_id))
         branch = request.query_params.get("branch")
         if not branch:
             b = Branch.resolve_default()

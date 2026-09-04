@@ -19,6 +19,7 @@ import OperatorMySales from './pages/OperatorMySales'
 import WarehouseLayout from './components/WarehouseLayout'
 import WarehouseDashboard from './pages/WarehouseDashboard'
 import Workflow from './pages/Workflow'
+import DirectorHome from './pages/DirectorHome'
 import WarehouseStock from './pages/WarehouseStock'
 import Expenses from './pages/Expenses'
 import Accounts from './pages/Accounts'
@@ -90,7 +91,8 @@ function AppRoutes() {
             </ProtectedRoute>
           }
         >
-          <Route index element={<Reports lockedModule={directorModule} />} />
+          <Route index element={<DirectorHome />} />
+          <Route path="reports" element={<Reports lockedModule={directorModule} />} />
           {directorModule === 'EXPRESS' && <Route path="workflow" element={<Workflow />} />}
           {directorModule === 'EXPRESS' && <Route path="stock" element={<WarehouseStock />} />}
           <Route path="*" element={<Navigate to="/" replace />} />
