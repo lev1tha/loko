@@ -285,9 +285,22 @@ cd /opt/loko/infra && docker compose exec backend python manage.py import_kargoo
 15 3 * * *   cd /opt/loko/infra && docker compose exec -T backend python manage.py import_kargoosh --rescan      >> /var/log/loko-kargo-sync.log 2>&1
 ```
 
+Мост работает в обе стороны. Kargoosh → Loko: клиенты и заказы сайта (cron выше).
+Loko → Kargoosh: продажи, созданные в Loko (складовщик оприходовал код, заявка
+выдана, прямая продажа кассира), сразу пишутся в таблицу `orders` сайта — клиент
+видит их в кабинете kargoosh.kg со статусом «на складе» / «отдан». Не ушедшее
+(MySQL был недоступен) добирает `push_kargoosh` или следующий `--incremental`.
+Для таких строк Loko — хозяин: импорт их не перезаписывает. Правки по ним в
+PHP-админке не подхватываются — сотрудники работают в Loko.
+
+```bash
+cd /opt/loko/infra && docker compose exec backend python manage.py push_kargoosh --dry-run
+```
+
 Состояние последней синхронизации: `GET https://api.kargoosh.kg/api/kargo/sync/`
 (с заголовком `X-Kargo-Token`). Когда PHP переключён на запись через
-`/api/kargo/…` (см. `KARGO-API.md`) — cron выключить, иначе будет два мастера.
+`/api/kargo/…` (см. `KARGO-API.md`) — cron и `KARGO_PUSH_IMMEDIATE` выключить,
+иначе будет два мастера.
 
 ## Безопасность (чек-лист)
 

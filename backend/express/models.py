@@ -1,7 +1,7 @@
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.conf import settings as dj_settings
-from django.db import models
+from django.db import models, transaction
 from django.utils import timezone
 
 from finance.models import Account, AppSettings
@@ -116,6 +116,15 @@ class Sale(models.Model):
     )
     legacy_kargo_id = models.IntegerField(
         null=True, blank=True, unique=True, verbose_name="ID заказа в Kargo Osh",
+    )
+    # Обратный мост Loko → Kargoosh: продажа, созданная в Loko, отправляется в
+    # таблицу orders сайта (клиент видит её в кабинете kargoosh.kg). Для таких
+    # строк Loko — главный: импорт из Kargoosh их не перезаписывает.
+    kargo_sync_pending = models.BooleanField(
+        default=False, db_index=True, verbose_name="Ждёт отправки в Kargoosh",
+    )
+    kargo_pushed_at = models.DateTimeField(
+        null=True, blank=True, verbose_name="Отправлено в Kargoosh",
     )
     created_by = models.ForeignKey(
         dj_settings.AUTH_USER_MODEL,
@@ -381,29 +390,36 @@ class WarehouseItem(models.Model):
     def __str__(self) -> str:
         return f"{self.client_code} · {self.get_status_display()}"
 
-    def receive(self, weight_kg, account, by_user=None):
+    def receive(self, weight_kg, account, by_user=None, tracking_number=None):
         """Оприходовать позицию: создать официальную продажу Express по весу и тарифу.
 
         Тариф — как в режиме «по весу» (``Sale`` считает цену в ``save()``: вес ×
         цена/кг из Настроек либо индивидуальная цена клиента). Продажа
         атрибутируется оператору-создателю заявки; себестоимость/маржа — на продаже.
+        ``tracking_number`` — необязательный трек-номер посылки (для кабинета
+        клиента на kargoosh.kg; без него мост подставит LOKO-<id>).
         """
         weight = Decimal(str(weight_kg)).quantize(THREE_PLACES, rounding=ROUND_HALF_UP)
-        sale = Sale.objects.create(
-            client_code=self.client_code,
-            amount_mode=Sale.AmountMode.WEIGHT,
-            weight_kg=weight,
-            account=account,
-            branch=self.order.branch,
-            date=timezone.localdate(),
-            created_by=self.order.created_by,
-        )
-        self.sale = sale
-        self.weight_kg = weight
-        self.reason = ""
-        self.found_by = by_user
-        self.status = self.Status.FOUND
-        self.save()
+        track = (tracking_number or "").strip() or None
+        # Атомарно: мост Loko → Kargoosh срабатывает по on_commit и должен видеть
+        # продажу уже привязанной к позиции (иначе она уйдёт как «прямая», статус 3).
+        with transaction.atomic():
+            sale = Sale.objects.create(
+                client_code=self.client_code,
+                amount_mode=Sale.AmountMode.WEIGHT,
+                weight_kg=weight,
+                account=account,
+                branch=self.order.branch,
+                date=timezone.localdate(),
+                created_by=self.order.created_by,
+                tracking_number=track,
+            )
+            self.sale = sale
+            self.weight_kg = weight
+            self.reason = ""
+            self.found_by = by_user
+            self.status = self.Status.FOUND
+            self.save()
         return sale
 
     def mark_not_found(self, reason, by_user=None):

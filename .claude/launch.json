@@ -4,13 +4,26 @@
     {
       "name": "loko-frontend",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "frontend", "run", "dev", "--", "--port", "5174", "--strictPort"],
+      "runtimeArgs": [
+        "--prefix",
+        "frontend",
+        "run",
+        "dev",
+        "--",
+        "--port",
+        "5174",
+        "--strictPort"
+      ],
       "port": 5174
     },
     {
       "name": "loko-backend",
       "runtimeExecutable": "backend/venv/bin/python",
-      "runtimeArgs": ["backend/manage.py", "runserver", "127.0.0.1:8009"],
+      "runtimeArgs": [
+        "backend/manage.py",
+        "runserver",
+        "127.0.0.1:8009"
+      ],
       "port": 8009
     }
   ]

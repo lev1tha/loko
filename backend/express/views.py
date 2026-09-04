@@ -594,7 +594,10 @@ class WarehouseItemViewSet(viewsets.ReadOnlyModelViewSet):
             raise serializers.ValidationError({"status": "Позиция уже оприходована."})
         ser = WarehouseReceiveSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
-        item.receive(ser.validated_data["weight_kg"], ser.validated_data["account"], by_user=request.user)
+        item.receive(
+            ser.validated_data["weight_kg"], ser.validated_data["account"], by_user=request.user,
+            tracking_number=ser.validated_data.get("tracking_number") or None,
+        )
         return Response(WarehouseItemSerializer(item).data)
 
     @extend_schema(request=WarehouseNotFoundSerializer, responses=WarehouseItemSerializer)

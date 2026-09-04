@@ -239,6 +239,13 @@ class WarehouseReceiveSerializer(serializers.Serializer):
     account = serializers.PrimaryKeyRelatedField(
         queryset=Account.objects.filter(module="EXPRESS", currency="KGS", is_active=True),
     )
+    tracking_number = serializers.CharField(max_length=120, required=False, allow_blank=True, default="")
+
+    def validate_tracking_number(self, value):
+        value = (value or "").strip()
+        if value and Sale.objects.filter(tracking_number=value).exists():
+            raise serializers.ValidationError("Продажа с таким трек-номером уже есть.")
+        return value
 
 
 class WarehouseNotFoundSerializer(serializers.Serializer):

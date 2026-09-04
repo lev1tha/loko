@@ -32,6 +32,7 @@ export default function WarehouseDashboard() {
   const [receiveItem, setReceiveItem] = useState(null)
   const [weight, setWeight] = useState('')
   const [accountId, setAccountId] = useState('')
+  const [tracking, setTracking] = useState('')
 
   const dayParams = useMemo(
     () => ({ active_items: 1, ...(search.trim() ? { search: search.trim() } : {}) }),
@@ -57,6 +58,7 @@ export default function WarehouseDashboard() {
     setError('')
     setReceiveItem(item)
     setWeight('')
+    setTracking('')
     const def = accounts.find((a) => a.kind === 'CASH') || accounts[0]
     setAccountId(def ? String(def.id) : '')
   }
@@ -70,7 +72,7 @@ export default function WarehouseDashboard() {
     setError('')
     try {
       await api.post(`/warehouse-items/${receiveItem.id}/receive/`, {
-        weight_kg: weight, account: accountId,
+        weight_kg: weight, account: accountId, tracking_number: tracking.trim(),
       })
       setReceiveItem(null)
       dayReq.reload(); eveningReq.reload()
@@ -199,6 +201,12 @@ export default function WarehouseDashboard() {
               className="input" type="number" step="0.001" min="0"
               value={weight} onChange={(e) => setWeight(e.target.value)}
               placeholder="5" autoFocus
+            />
+          </Field>
+          <Field label="Трек-номер посылки" hint="Необязательно. Клиент увидит его в кабинете kargoosh.kg">
+            <input
+              className="input" value={tracking} onChange={(e) => setTracking(e.target.value)}
+              placeholder="YT8872477816368"
             />
           </Field>
           <Field label="Счёт зачисления (нал/безнал)">

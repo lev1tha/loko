@@ -298,6 +298,19 @@ PUBLIC_SITE_URL = config("PUBLIC_SITE_URL", default="http://localhost:5174")
 # эндпоинты /api/kargo/ закрыты (fail closed). Генерация: `openssl rand -hex 32`.
 KARGO_API_TOKEN = config("KARGO_API_TOKEN", default="")
 
+# MySQL сайта kargoosh.kg — мост в обе стороны (import_kargoosh и обратная отправка
+# продаж в кабинет клиента). Пустой KARGO_DB_HOST → мост выключен.
+KARGO_DB_HOST = config("KARGO_DB_HOST", default="")
+KARGO_DB_PORT = config("KARGO_DB_PORT", default=3306, cast=int)
+KARGO_DB_USER = config("KARGO_DB_USER", default="root")
+KARGO_DB_PASSWORD = config("KARGO_DB_PASSWORD", default="")
+KARGO_DB_NAME = config("KARGO_DB_NAME", default="kargoosh_tmp")
+# Отправлять продажу в Kargoosh сразу при сохранении (best effort, ошибки не
+# ломают запрос); иначе — только cron `push_kargoosh` / `import_kargoosh --incremental`.
+KARGO_PUSH_IMMEDIATE = config("KARGO_PUSH_IMMEDIATE", default=True, cast=bool)
+# admin.pk_i_id в Kargoosh для заказов филиалов без региона Kargo (Loko-филиалы Оша).
+KARGO_DEFAULT_ADMIN_ID = config("KARGO_DEFAULT_ADMIN_ID", default=2, cast=int)
+
 # ---------------------------------------------------------------------------
 # Production hardening — active behind Cloudflare (HTTPS terminated by CF).
 # ---------------------------------------------------------------------------

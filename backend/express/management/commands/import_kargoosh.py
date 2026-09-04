@@ -76,12 +76,13 @@ class _Rollback(Exception):
 
 
 def _src_conn():
+    from django.conf import settings
     return pymysql.connect(
-        host=os.environ.get("KARGO_DB_HOST", "localhost"),
-        port=int(os.environ.get("KARGO_DB_PORT", "3306")),
-        user=os.environ.get("KARGO_DB_USER", "root"),
-        password=os.environ.get("KARGO_DB_PASSWORD", ""),
-        database=os.environ.get("KARGO_DB_NAME", "kargoosh_tmp"),
+        host=settings.KARGO_DB_HOST or os.environ.get("KARGO_DB_HOST", "localhost"),
+        port=settings.KARGO_DB_PORT,
+        user=settings.KARGO_DB_USER,
+        password=settings.KARGO_DB_PASSWORD,
+        database=settings.KARGO_DB_NAME,
         charset="utf8mb4",
         cursorclass=pymysql.cursors.DictCursor,
     )
@@ -192,12 +193,18 @@ class Command(BaseCommand):
         оставляем: на них уже могут ссылаться продажи, созданные в Loko через
         /api/kargo/ (FK PROTECT), а импорт всё равно переиспользует их по
         legacy-ключам и заново сводит начальные остатки."""
-        n_s = Sale.objects.filter(legacy_kargo_id__isnull=False).delete()[0]
+        n_s = Sale.objects.filter(legacy_kargo_id__isnull=False, kargo_pushed_at__isnull=True).delete()[0]
         n_c = Client.objects.filter(legacy_kargo_id__isnull=False).delete()[0]
         self.stdout.write(f"  очищены прежние legacy-строки: sale={n_s} client={n_c}")
 
     # ---------------------------------------------------------- upsert mode
     def _run_upsert(self, since):
+        # Сначала обратный мост: продажи Loko → Kargoosh (их строки потом придут
+        # назад тем же импортом, но перезаписываться не будут — Loko главный).
+        from express import kargo_push
+        pushed = kargo_push.push_pending(conn=self.src)
+        self.stats["pushed"] = pushed
+        self.stdout.write(f"  Loko → Kargoosh: {pushed}")
         regions, admin_branch = self._import_branches()
         card_acc = self._import_accounts(create_only=True)
         self._upsert_clients(regions)
@@ -268,8 +275,9 @@ class Command(BaseCommand):
         if not accounts:
             return
         amounts = {c["pk_i_id"]: _d(c["i_amount"]) for c in self._q("SELECT pk_i_id, i_amount FROM cards")}
+        # Продажи, рождённые в Loko и отправленные мостом, — деньги Loko, а не касс Kargo.
         paid = dict(
-            Sale.objects.filter(legacy_kargo_id__isnull=False, account__in=accounts)
+            Sale.objects.filter(legacy_kargo_id__isnull=False, kargo_pushed_at__isnull=True, account__in=accounts)
             .values_list("account_id").annotate(s=Sum("paid_som")).values_list("account_id", "s")
         )
         for acc in accounts:
@@ -385,7 +393,11 @@ class Command(BaseCommand):
         sql = "SELECT * FROM orders" + (f" LIMIT {self.limit}" if self.limit else "")
         buf, total, seen_track = [], 0, set()
         const = self._const_fields()
+        loko_owned = set(Sale.objects.filter(kargo_pushed_at__isnull=False).values_list("legacy_kargo_id", flat=True))
         for o in self._q(sql):
+            if o["pk_i_id"] in loko_owned:
+                total += 1  # строка есть в обеих системах, хозяин — Loko
+                continue
             f = self._sale_fields(o, admin_branch, card_acc, txn_card, default_acc)
             if f["tracking_number"] and f["tracking_number"] in seen_track:
                 f["tracking_number"] = None
@@ -424,6 +436,8 @@ class Command(BaseCommand):
             ids = [o["pk_i_id"] for o in chunk]
             tracks = [t for t in ((o["s_tracking_number"] or "").strip() for o in chunk) if t]
             by_legacy = {s.legacy_kargo_id: s for s in Sale.objects.filter(legacy_kargo_id__in=ids)}
+            # Строки, рождённые в Loko и отправленные мостом, — Loko главный, пропускаем.
+            loko_owned = {s.legacy_kargo_id for s in by_legacy.values() if s.kargo_pushed_at is not None}
             # Кто уже держит трек в Loko: legacy id другого заказа → в источнике дубль
             # (номера отличались пробелами; в Kargo unique, после TRIM — нет) — второму
             # трек не даём, как и при полном импорте. Держатель без legacy id — заказ,
@@ -432,6 +446,9 @@ class Command(BaseCommand):
             seen_track = set()
             new, upd = [], []
             for o in chunk:
+                if o["pk_i_id"] in loko_owned:
+                    unchanged += 1
+                    continue
                 f = self._sale_fields(o, admin_branch, card_acc, txn_card, default_acc)
                 t = f["tracking_number"]
                 holder = holders.get(t) if t else None
@@ -463,12 +480,18 @@ class Command(BaseCommand):
 
     # ------------------------------------------------------------- reconcile
     def _reconcile(self, base):
-        s = Sale.objects.filter(legacy_kargo_id__isnull=False).aggregate(
-            n=Count("id"), som=Sum("price_som"), kg=Sum("weight_kg"))
+        # Сверяем только перенесённое ИЗ Kargo; строки, отправленные из Loko, есть в
+        # обеих системах (источник их тоже считает), поэтому добавляем их число к n.
+        imported = Sale.objects.filter(legacy_kargo_id__isnull=False, kargo_pushed_at__isnull=True)
+        pushed = Sale.objects.filter(kargo_pushed_at__isnull=False, legacy_kargo_id__isnull=False)
+        s = imported.aggregate(n=Count("id"), som=Sum("price_som"), kg=Sum("weight_kg"))
+        s["n"] = (s["n"] or 0) + pushed.count()
+        s["som"] = (s["som"] or ZERO) + (pushed.aggregate(v=Sum("price_som"))["v"] or ZERO)
+        s["kg"] = (s["kg"] or ZERO) + (pushed.aggregate(v=Sum("weight_kg"))["v"] or ZERO)
         cl = Client.objects.filter(legacy_kargo_id__isnull=False).count()
         kargo_accs = Account.objects.filter(legacy_kargo_card_id__isnull=False, module="EXPRESS")
         acc_kargo = (kargo_accs.aggregate(s=Sum("initial_balance"))["s"] or ZERO) + (
-            Sale.objects.filter(legacy_kargo_id__isnull=False, account__in=kargo_accs).aggregate(s=Sum("paid_som"))["s"] or ZERO)
+            imported.filter(account__in=kargo_accs).aggregate(s=Sum("paid_som"))["s"] or ZERO)
         all_ok = True
 
         def line(name, src, dst, money=False):
