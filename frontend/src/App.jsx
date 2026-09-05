@@ -1,5 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import ClientApp from './client/ClientApp'
+import { DialogHost } from './lib/dialogs'
 import { AuthProvider, useAuth } from './auth/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -49,6 +50,7 @@ export default function App() {
       <BrowserRouter>
         <ErrorBoundary>
           <AppRoutes />
+          <DialogHost />
         </ErrorBoundary>
       </BrowserRouter>
     </AuthProvider>

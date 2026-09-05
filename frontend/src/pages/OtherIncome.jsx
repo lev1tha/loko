@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import api, { errorMessage } from '../api/client'
 import { useFetch, asList } from '../lib/hooks'
+import { confirm } from '../lib/dialogs'
 import { firstOfMonth, today, money, dateRu } from '../lib/format'
 import { Alert, EmptyState, Field, Modal, Spinner } from '../components/ui'
 import { IconPlus, IconTrash } from '../components/icons'
@@ -27,7 +28,7 @@ export default function OtherIncome({ lockedModule = null }) {
   const totalKgs = rows.reduce((a, r) => a + Number(r.amount_kgs || 0), 0)
 
   async function remove(r) {
-    if (!window.confirm(`Удалить ${noun.toLowerCase()} на ${money(r.amount)}?`)) return
+    if (!(await confirm(`Удалить ${noun.toLowerCase()} на ${money(r.amount)}?`))) return
     setBusyId(r.id)
     setError('')
     try {

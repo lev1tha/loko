@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import api, { errorMessage } from '../api/client'
 import { useFetch, asList } from '../lib/hooks'
+import { confirm } from '../lib/dialogs'
 import { Alert, Badge, EmptyState, Field, Modal, Spinner } from '../components/ui'
 import { IconPlus, IconEdit, IconTrash, IconQr } from '../components/icons'
 
@@ -17,7 +18,7 @@ export default function Branches() {
   const rows = asList(req.data)
 
   async function remove(b) {
-    if (!window.confirm(`Удалить филиал «${b.name}»?`)) return
+    if (!(await confirm(`Удалить филиал «${b.name}»?`))) return
     setBusyId(b.id)
     setError('')
     try {

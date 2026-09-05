@@ -2,6 +2,7 @@ import { useState } from 'react'
 import api, { errorMessage } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { useFetch, asList } from '../lib/hooks'
+import { confirm } from '../lib/dialogs'
 import { Alert, Badge, EmptyState, Field, Modal, Spinner } from '../components/ui'
 import { IconPlus, IconEdit, IconTrash } from '../components/icons'
 
@@ -30,7 +31,7 @@ export default function Users() {
   }
 
   async function remove(u) {
-    if (!window.confirm(`Удалить пользователя «${u.username}»? Действие необратимо.`)) return
+    if (!(await confirm(`Удалить пользователя «${u.username}»? Действие необратимо.`))) return
     setBusyId(u.id)
     setError('')
     try {

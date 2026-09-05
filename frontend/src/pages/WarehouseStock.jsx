@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import api, { errorMessage } from '../api/client'
 import { useFetch, asList } from '../lib/hooks'
+import { confirm } from '../lib/dialogs'
 import { useAuth } from '../auth/AuthContext'
 import { num, today, dateRu } from '../lib/format'
 import { Alert, Field, Modal, Spinner } from '../components/ui'
@@ -65,7 +66,7 @@ export default function WarehouseStock() {
   }
 
   async function remove(entry) {
-    if (!window.confirm(`Удалить запись ${dateRu(entry.date)} · ${entry.kind_display} ${num(entry.kg, 3)} кг?`)) return
+    if (!(await confirm(`Удалить запись ${dateRu(entry.date)} · ${entry.kind_display} ${num(entry.kg, 3)} кг?`))) return
     setError('')
     try {
       await api.delete(`/warehouse-stock/${entry.id}/`)

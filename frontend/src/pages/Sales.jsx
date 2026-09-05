@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import api, { errorMessage } from '../api/client'
 import { useFetch, asList } from '../lib/hooks'
+import { confirm } from '../lib/dialogs'
 import { firstOfMonth, today, som, kg, dateRu, signClass } from '../lib/format'
 import { Alert, Badge, EmptyState, Field, Modal, Segmented, Spinner, Stat } from '../components/ui'
 import { IconPlus, IconEdit, IconTrash } from '../components/icons'
@@ -77,7 +78,7 @@ export default function Sales() {
   }
 
   async function remove(r) {
-    if (!window.confirm(`Удалить продажу «${r.client_code}» на ${som(r.price_som)}?`)) return
+    if (!(await confirm(`Удалить продажу «${r.client_code}» на ${som(r.price_som)}?`))) return
     setBusyId(r.id)
     setError('')
     try {

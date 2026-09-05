@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import api, { errorMessage } from '../api/client'
 import { useFetch, asList } from '../lib/hooks'
+import { confirm } from '../lib/dialogs'
 import { som } from '../lib/format'
 import { Alert, EmptyState, Field, Modal, Spinner } from '../components/ui'
 import { IconPlus, IconEdit, IconTrash } from '../components/icons'
@@ -15,7 +16,7 @@ export default function ClientPrices() {
   const rows = asList(prices.data)
 
   async function remove(r) {
-    if (!window.confirm(`Удалить цену клиента «${r.client_code}» (${som(r.price_per_kg_som)}/кг)?`)) return
+    if (!(await confirm(`Удалить цену клиента «${r.client_code}» (${som(r.price_per_kg_som)}/кг)?`))) return
     setBusyId(r.id)
     setError('')
     try {

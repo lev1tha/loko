@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import api, { errorMessage } from '../api/client'
 import { useFetch, asList } from '../lib/hooks'
+import { confirm } from '../lib/dialogs'
 import { firstOfMonth, today, money, dateRu } from '../lib/format'
 import { useAuth } from '../auth/AuthContext'
 import { Alert, Badge, EmptyState, Field, Modal, Spinner } from '../components/ui'
@@ -22,7 +23,7 @@ export default function Transfers({ module }) {
 
   // Правка/удаление операций — привилегия администратора (корректировка обмена/переводов).
   async function removeTransfer(t) {
-    if (!window.confirm(`Удалить перевод от ${dateRu(t.date)} на ${money(t.amount, t.from_currency)}? Действие необратимо.`)) return
+    if (!(await confirm(`Удалить перевод от ${dateRu(t.date)} на ${money(t.amount, t.from_currency)}? Действие необратимо.`))) return
     setBusyId(t.id)
     setError('')
     try {

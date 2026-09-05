@@ -582,7 +582,7 @@ class WarehouseOrderViewSet(viewsets.ModelViewSet):
         parameters=[
             OpenApiParameter(
                 "status", OpenApiTypes.STR, enum=[s.value for s in WarehouseItem.Status],
-                description="Фильтр по статусу позиции (напр. EVENING — вечерний допоиск)",
+                description="Статус позиции, можно несколько через запятую (вечерний допоиск: NOT_FOUND,EVENING)",
             ),
         ]
     )
@@ -611,7 +611,8 @@ class WarehouseItemViewSet(viewsets.ReadOnlyModelViewSet):
         # менеджер/админ — все позиции
         status = self.request.query_params.get("status")
         if status:
-            qs = qs.filter(status=status)
+            # один статус или несколько через запятую (вечерний допоиск = NOT_FOUND,EVENING)
+            qs = qs.filter(status__in=[x.strip() for x in status.split(",") if x.strip()])
         return qs.order_by("id")
 
     @extend_schema(request=WarehouseReceiveSerializer, responses=WarehouseItemSerializer)

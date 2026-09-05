@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import api, { errorMessage } from '../api/client'
 import { useFetch, asList } from '../lib/hooks'
+import { confirm } from '../lib/dialogs'
 import { firstOfMonth, today, money, dateRu, signClass } from '../lib/format'
 import { Alert, Badge, EmptyState, Field, Modal, Segmented, Spinner } from '../components/ui'
 import { IconPlus, IconEdit, IconTrash } from '../components/icons'
@@ -94,7 +95,7 @@ export default function Expenses({ lockedModule = null }) {
   const otherExp = totalKgs - profitExp
 
   async function remove(e) {
-    if (!window.confirm(`Удалить расход «${e.category_display}» на ${money(e.amount)}?`)) return
+    if (!(await confirm(`Удалить расход «${e.category_display}» на ${money(e.amount)}?`))) return
     setBusyId(e.id)
     setError('')
     try {

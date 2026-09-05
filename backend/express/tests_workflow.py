@@ -85,6 +85,17 @@ class WorkflowContentTests(Base):
         self.assertEqual((r.data["totals"]["active_orders_now"], r.data["totals"]["evening_now"]), (1, 0))
         self.assertEqual([o["id"] for o in r.data["active_orders"]], [o2.id])
 
+    def test_not_found_counts_as_evening(self):
+        o, (a, b) = self._order(["N1", "N2"])
+        a.mark_not_found("нет", by_user=self.wh)           # склад не нашёл — уже в вечернем
+        self.as_(self.dir_ex)
+        r = self.client.get("/api/reports/workflow/")
+        self.assertEqual(r.data["totals"]["evening_now"], 1)
+        self.assertEqual([e["client_code"] for e in r.data["evening"]], ["N1"])
+        self.as_(self.wh)
+        r = self.client.get("/api/warehouse-items/", {"status": "NOT_FOUND,EVENING"})
+        self.assertEqual([i["client_code"] for i in r.data["results"]], ["N1"])
+
     def test_period_excludes_old(self):
         o, (a,) = self._order(["Z1"])
         a.receive("1", self.acc, by_user=self.wh)

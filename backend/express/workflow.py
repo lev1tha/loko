@@ -107,8 +107,9 @@ def build_workflow(date_from=None, date_to=None, branch_id=None):
         .select_related("branch", "created_by", "assigned_to").prefetch_related("items", "items__sale")
         .distinct().order_by("-created_at")
     )
+    # Вечерний допоиск = всё, что днём не нашли: «не найдено» складом и убранное оператором из чека.
     evening_qs = (
-        WarehouseItem.objects.filter(status=WarehouseItem.Status.EVENING)
+        WarehouseItem.objects.filter(status__in=[WarehouseItem.Status.NOT_FOUND, WarehouseItem.Status.EVENING])
         .select_related("order", "order__branch", "order__created_by", "sale").order_by("id")
     )
     if branch_id:
@@ -222,7 +223,7 @@ def build_stock(branch_id):
         "days": list(reversed(days))[:DAYS_CAP],
         "entries": [
             {"id": e.id, "date": e.date.isoformat(), "kind": e.kind, "kind_display": e.get_kind_display(),
-             "kg": str(e.kg), "note": e.note,
+             "kg": str(e.kg), "note": e.note, "created_by": e.created_by_id,
              "created_by_name": (e.created_by.get_full_name() or e.created_by.username) if e.created_by_id else None,
              "created_at": e.created_at}
             for e in reversed(entries)

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import api, { errorMessage } from '../api/client'
 import { useFetch, asList } from '../lib/hooks'
+import { confirm } from '../lib/dialogs'
 import { useAuth } from '../auth/AuthContext'
 import { money, today, dateRu, firstOfMonth } from '../lib/format'
 import { Alert, Field, Segmented } from '../components/ui'
@@ -49,7 +50,7 @@ export default function DirectorIncome() {
   }
 
   async function remove(r) {
-    if (!window.confirm(`Удалить доход «${r.description}» на ${money(r.amount)}?`)) return
+    if (!(await confirm(`Удалить доход «${r.description}» на ${money(r.amount)}?`))) return
     try { await api.delete(`/other-income/${r.id}/`); list.reload() } catch (err) { setError(errorMessage(err)) }
   }
 

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useAuth } from '../auth/AuthContext'
 import api, { errorMessage } from '../api/client'
 import { useFetch, asList } from '../lib/hooks'
+import { confirm } from '../lib/dialogs'
 import { money, today, dateRu, firstOfMonth } from '../lib/format'
 import { Alert, Field, Segmented } from '../components/ui'
 import '../director.css'
@@ -88,7 +89,7 @@ export default function DirectorExpense() {
   }
 
   async function remove(r) {
-    if (!window.confirm(`Удалить расход «${r.description || r.category_display}» на ${money(r.amount)}?`)) return
+    if (!(await confirm(`Удалить расход «${r.description || r.category_display}» на ${money(r.amount)}?`))) return
     try { await api.delete(`/expenses/${r.id}/`); list.reload() } catch (err) { setError(errorMessage(err)) }
   }
 

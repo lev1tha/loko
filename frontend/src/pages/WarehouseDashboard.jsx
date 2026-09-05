@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import api, { errorMessage } from '../api/client'
 import { useFetch, asList } from '../lib/hooks'
+import { prompt } from '../lib/dialogs'
 import { useAuth } from '../auth/AuthContext'
 import { som, kg } from '../lib/format'
 import { Alert, Field, Modal, Spinner } from '../components/ui'
@@ -42,7 +43,8 @@ export default function WarehouseDashboard() {
     [search],
   )
   const dayReq = useFetch('/warehouse-orders/', dayParams)
-  const eveningReq = useFetch('/warehouse-items/', { status: 'EVENING' })
+  // Вечерний допоиск: всё, что днём не нашли (не найдено складом + убрано оператором из чека).
+  const eveningReq = useFetch('/warehouse-items/', { status: 'NOT_FOUND,EVENING' })
   // Ожидаемые посылки: заказы Kargoosh «в пути», сгруппированы по клиенту (заявки моста).
   const expectedParams = useMemo(
     () => ({ origin: 'KARGO', active: 1, ...(search.trim() ? { search: search.trim() } : {}) }),
@@ -108,8 +110,11 @@ export default function WarehouseDashboard() {
   }
 
   async function markNotFound(item) {
-    const reason = window.prompt('Что не найдено / где искали (обязательно):', '')
-    if (!reason || !reason.trim()) return
+    const reason = await prompt({
+      title: `Не найдено · ${item.client_code}`, label: 'Что не найдено / где искали', okLabel: 'Отметить «не найдено»',
+      hint: 'Позиция уйдёт во вкладку «Вечерний допоиск», сотрудник увидит причину', placeholder: 'например: нет на полках Б-3, Б-4',
+    })
+    if (!reason) return
     setBusyId(item.id)
     setError('')
     try {
