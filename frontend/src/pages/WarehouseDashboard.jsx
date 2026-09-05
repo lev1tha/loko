@@ -146,11 +146,22 @@ export default function WarehouseDashboard() {
           <p className="muted" style={{ margin: '2px 0 0' }}>
             {isWarehouse ? 'Заявки вашего филиала' : 'Все филиалы'} · обновляется автоматически
           </p>
-          {stock.data?.since && (
-            <p style={{ margin: '6px 0 0', fontSize: 14 }}>
-              На складе сейчас: <strong>{kg(stock.data.balance_kg)}</strong>
-              <span className="muted"> · учёт с {stock.data.since.split('-').reverse().join('.')}</span>
-            </p>
+          {isWarehouse && stock.data && (
+            <div className="wh-stock">
+              {stock.data.since ? (
+                <>
+                  <span className="wh-stock-lbl">На складе сейчас</span>
+                  <strong className={`wh-stock-val ${parseFloat(stock.data.balance_kg) < 0 ? 'neg' : ''}`}>{kg(stock.data.balance_kg)}</strong>
+                  <span className="muted">учёт с {stock.data.since.split('-').reverse().join('.')} · приход вносит директор, расход считается по оприходованному весу</span>
+                </>
+              ) : (
+                <>
+                  <span className="wh-stock-lbl">На складе сейчас</span>
+                  <strong className="wh-stock-val muted">—</strong>
+                  <span className="muted">учёт веса ещё не начат: директор вносит первый приход в разделе «Остаток на складе»</span>
+                </>
+              )}
+            </div>
           )}
         </div>
         <div className="row gap-sm wh-head-actions">

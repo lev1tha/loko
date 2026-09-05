@@ -104,9 +104,16 @@ class StockTests(Base):
                                    branch=branch or self.b1, date=d or timezone.localdate(), **kw)
 
     def test_access(self):
-        for user, code in ((self.dir_ex, 200), (self.admin, 200), (self.dir_bz, 200), (self.op, 403), (self.wh, 200)):
+        for user, code in ((self.dir_ex, 200), (self.admin, 200), (self.dir_bz, 200), (self.op, 200), (self.wh, 200)):
             self.as_(user)
             self.assertEqual(self.client.get("/api/warehouse-stock/summary/", {"branch": self.b1.id}).status_code, code, user.username)
+        # сотрудник: только остаток своего филиала, список и запись закрыты
+        self.as_(self.op)
+        WarehouseStock.objects.create(branch=self.b2, date=timezone.localdate(), kg=Decimal("7"))
+        r = self.client.get("/api/warehouse-stock/summary/", {"branch": self.b2.id})
+        self.assertEqual((r.data["branch"], r.data["balance_kg"]), (self.b1.id, "0.000"))
+        self.assertEqual(self.client.get("/api/warehouse-stock/").status_code, 403)
+        self.assertEqual(self.client.post("/api/warehouse-stock/", {"branch": self.b1.id, "date": str(timezone.localdate()), "kg": "1"}, format="json").status_code, 403)
 
     def test_warehouse_sees_only_own_branch_summary(self):
         WarehouseStock.objects.create(branch=self.b2, date=timezone.localdate(), kg=Decimal("50"))
@@ -151,6 +158,11 @@ class StockTests(Base):
         self.assertEqual(r.data["days"][0]["date"], today.isoformat())  # свежие сверху
         self.assertEqual(len(r.data["entries"]), 2)
 
+        # кто выдал вес: складовщик wh — 100 кг (позиция склада), прямая продажа кассира — 60+10 кг
+        by = {w["name"]: w for w in r.data["workers"]}
+        self.assertEqual(by["Склад Иванов"]["kg"], "100.000")
+        self.assertEqual(by["Без склада (прямая продажа)"]["kg"], "70.000")
+        self.assertEqual(by["Без склада (прямая продажа)"]["kg_today"], "10.000")
         # корректировка до фактического остатка: −5 → 175
         r = self.client.post("/api/warehouse-stock/", {"branch": self.b1.id, "date": today.isoformat(), "kind": "ADJUST", "kg": "-5", "note": "пересчёт"}, format="json")
         self.assertEqual(r.status_code, 201, r.data)

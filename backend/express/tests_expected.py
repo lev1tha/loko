@@ -104,6 +104,18 @@ class BoardAndReceiveTests(Base):
         self.assertFalse(WarehouseOrder.objects.filter(pk=kargo_order.pk).exists())   # пустая заявка моста удалена
         self.assertEqual(WarehouseItem.objects.filter(client_code__iexact="AL-12345").count(), 1)  # без пустого дубля
 
+    def test_received_expected_parcel_counts_in_stock(self):
+        from express.models import WarehouseStock
+        from express.workflow import build_stock
+        s = self.transit_sale("T7"); sync_expected()
+        item = WarehouseItem.objects.get(sale=s)
+        WarehouseStock.objects.create(branch=self.loko_osh, date=timezone.localdate(), kg=Decimal("100"))
+        item.receive("2.5", self.acc, by_user=self.wh)
+        d = build_stock(self.loko_osh.id)
+        self.assertEqual((d["balance_kg"], d["consumed_kg"]), ("97.500", "2.500"))
+        self.assertEqual(d["workers"][0]["name"], "wh")
+        self.assertEqual(d["workers"][0]["kg_today"], "2.500")
+
     def test_plain_receive_without_expected_still_creates_sale(self):
         o = WarehouseOrder.objects.create(branch=self.loko_osh, created_by=self.op, client_codes=["ZZ-1"])
         it = WarehouseItem.objects.create(order=o, client_code="ZZ-1")

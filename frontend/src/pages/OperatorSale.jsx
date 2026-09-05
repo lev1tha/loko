@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import api, { errorMessage } from '../api/client'
+import { useFetch } from '../lib/hooks'
 import { today, dateRu, som, kg } from '../lib/format'
 import { Alert, Field } from '../components/ui'
 import { IconPlus } from '../components/icons'
@@ -13,6 +14,8 @@ const FOUND = new Set(['FOUND', 'DELIVERED'])
 // складовщик найдёт и взвесит товар, строка зеленеет и показывается ЦЕНА.
 export default function OperatorSale() {
   const { userBranchName } = useAuth()
+  // Остаток веса на складе своего филиала — чтобы сотрудник знал, есть ли что выдавать.
+  const stock = useFetch(userBranchName ? '/warehouse-stock/summary/' : null, {})
   const [codes, setCodes] = useState([''])
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
@@ -96,6 +99,14 @@ export default function OperatorSale() {
           Впишите коды клиента (до {MAX_CODES}) — склад найдёт, взвесит и оприходует.
           Цена появится ниже. Дата: сегодня, {dateRu(today())}.
         </p>
+        {stock.data && (
+          <p className="muted" style={{ margin: '6px 0 0', fontSize: 14 }}>
+            На складе сейчас:{' '}
+            {stock.data.since
+              ? <strong style={{ color: parseFloat(stock.data.balance_kg) < 0 ? 'var(--error)' : 'var(--ink)' }}>{kg(stock.data.balance_kg)}</strong>
+              : <span>учёт веса ещё не начат</span>}
+          </p>
+        )}
       </div>
 
       {error && <Alert kind="error">{error}</Alert>}

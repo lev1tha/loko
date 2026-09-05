@@ -120,6 +120,28 @@ export default function WarehouseStock() {
             <Alert kind="error">Передано больше, чем внесено приходов. Добавьте недостающий приход или укажите фактический остаток.</Alert>
           )}
 
+          <section className="dir-panel">
+            <div className="dir-panel-head"><h3>Кто выдал вес</h3><span>складовщики, оприходовавшие груз, с начала учёта</span></div>
+            {!d.workers?.length ? <div className="empty">Пока никто не оприходовал груз с начала учёта.</div> : (
+              <div className="table-wrap">
+                <table className="table">
+                  <thead><tr><th>Складовщик</th><th>Роль</th><th className="num">Позиций</th><th className="num">Кг всего</th><th className="num">Кг сегодня</th></tr></thead>
+                  <tbody>
+                    {d.workers.map((w) => (
+                      <tr key={w.id ?? 'none'}>
+                        <td><strong>{w.name}</strong></td>
+                        <td className="muted">{w.role || '—'}</td>
+                        <td className="num">{w.count}</td>
+                        <td className="num"><strong>{num(w.kg, 1)}</strong></td>
+                        <td className="num">{parseFloat(w.kg_today) ? num(w.kg_today, 1) : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+
           <div className="dir-cols">
             <section className="dir-panel">
               <div className="dir-panel-head"><h3>По дням</h3>{d.days.length > 0 && <span>последние {Math.min(d.days.length, 60)} дн.</span>}</div>

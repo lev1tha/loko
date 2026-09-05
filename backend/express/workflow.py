@@ -148,12 +148,13 @@ def build_workflow(date_from=None, date_to=None, branch_id=None):
 # ---------------------------------------------------------------------------
 
 def _consumption_qs(branch_id, since):
-    """Расход склада: вес продаж Loko этого филиала (то, что сотрудники указали при
-    оприходовании; прямые продажи кассира тоже). Перенесённые из Kargo и заказы
-    Kargo-цикла (прибытие ≠ выдача со склада Loko) не считаем."""
-    return Sale.objects.filter(
-        branch_id=branch_id, date__gte=since, legacy_kargo_id__isnull=True,
-        delivery_status__isnull=True, weight_kg__isnull=False,
+    """Расход склада: вес, который склад Loko оприходовал на этой точке — позиции
+    склада (в т.ч. ожидаемые посылки с сайта, привязанные к его записям) и прямые
+    продажи кассира. Историю, перенесённую из Kargoosh, и заказы, взвешенные в
+    админке сайта (без складской позиции Loko), не считаем."""
+    return Sale.objects.filter(branch_id=branch_id, date__gte=since, weight_kg__isnull=False).filter(
+        Q(warehouse_item__status__in=list(WarehouseItem.FINANCIAL))
+        | Q(legacy_kargo_id__isnull=True, delivery_status__isnull=True)
     )
 
 
@@ -162,7 +163,7 @@ def build_stock(branch_id):
     entries = list(WarehouseStock.objects.filter(branch_id=branch_id).select_related("created_by").order_by("date", "id"))
     if not entries:
         return {"branch": branch_id, "since": None, "balance_kg": "0.000", "added_kg": "0.000",
-                "consumed_kg": "0.000", "days": [], "entries": []}
+                "consumed_kg": "0.000", "days": [], "entries": [], "workers": []}
     since = entries[0].date
     today = timezone.localdate()
 
@@ -187,7 +188,32 @@ def build_stock(branch_id):
     balance -= future
     added_total = sum((e.kg for e in entries), KG0)
     consumed_total = sum(consumed_by_day.values(), KG0)
+
+    # Кто выдал вес: по складовщику, оприходовавшему позицию (found_by). Прямые продажи
+    # кассира без складской позиции — отдельной строкой.
+    workers = {}
+    cons = _consumption_qs(branch_id, since).select_related("warehouse_item__found_by")
+    for sale in cons.only("weight_kg", "date", "warehouse_item"):
+        item = getattr(sale, "warehouse_item", None)
+        u = item.found_by if item is not None else None
+        key = u.id if u else 0
+        w = workers.setdefault(key, {
+            "id": u.id if u else None,
+            "name": (u.get_full_name() or u.username) if u else "Без склада (прямая продажа)",
+            "role": u.get_role_display() if u else "",
+            "kg": KG0, "count": 0, "kg_today": KG0, "count_today": 0,
+        })
+        w["kg"] += sale.weight_kg or KG0
+        w["count"] += 1
+        if sale.date == today:
+            w["kg_today"] += sale.weight_kg or KG0
+            w["count_today"] += 1
+    workers = sorted(workers.values(), key=lambda w: -w["kg"])
+    for w in workers:
+        w["kg"] = str(w["kg"].quantize(KG0)); w["kg_today"] = str(w["kg_today"].quantize(KG0))
+
     return {
+        "workers": workers,
         "branch": branch_id,
         "since": since.isoformat(),
         "balance_kg": str(balance.quantize(KG0)),

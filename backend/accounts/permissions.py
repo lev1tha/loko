@@ -181,9 +181,9 @@ class StockAccess(BasePermission):
     """Остаток веса на складе (``WarehouseStock``).
 
     Единственное место, где директор ПИШЕТ: он ежедневно вносит приход кг на
-    склад. Admin / Manager — тоже. Складовщик — только ``summary`` своего
-    филиала (строка «на складе сейчас» на доске; филиал подставляет вьюсет).
-    Operator — нет. Удаление — админ или автор записи (проверка в вьюсете).
+    склад. Admin / Manager — тоже. Складовщик и сотрудник — только ``summary``
+    своего филиала (строка «на складе сейчас»; филиал подставляет вьюсет).
+    Удаление — админ или автор записи (проверка в вьюсете).
     """
 
     message = "Недостаточно прав: раздел недоступен для этой роли."
@@ -192,9 +192,8 @@ class StockAccess(BasePermission):
         user = request.user
         if not (user and user.is_authenticated):
             return False
-        if _is_operator(user):
-            return False
-        if _is_warehouse(user):
+        if _is_operator(user) or _is_warehouse(user):
+            # Складовщик и сотрудник — только остаток своего филиала (чтение).
             return getattr(view, "action", None) == "summary"
         if _is_director(user):
             return _director_express(user)
