@@ -6,12 +6,19 @@ class User(AbstractUser):
     """Application user with a role-based access model.
 
     Roles:
-      * ADMIN    — full access, may edit dynamic cost price and settings.
-      * MANAGER  — cashier/manager: registers sales, expenses, transfers; sees reports.
-      * DIRECTOR — «Директор»: read-only. Sees ONLY the ОПиУ/ОДДС reports of his own
-                   direction (``module``); cannot add or edit anything anywhere.
-      * OPERATOR — «Сотрудник»: data-entry only. May ONLY add Loko Express sales;
-                   has NO access to any financial data, reports or other modules.
+      * ADMIN     — full access, may edit dynamic cost price and settings.
+      * MANAGER   — cashier/manager: registers sales, expenses, transfers; sees reports.
+      * DIRECTOR  — «Директор»: reports plus his OWN entries. Sees the ОПиУ/ОДДС of
+                    his direction (``module``) by default and both directions with
+                    ``?module=all``. May ADD income/expenses of that direction and
+                    warehouse intake (kg), and delete only what he created; editing
+                    existing records is denied. See ``DirectorEntryAccess``.
+      * OPERATOR  — «Сотрудник»: creates warehouse orders from client codes. Does NOT
+                    create sales directly — a sale is born when the warehouse worker
+                    receives the item — and has NO access to financial data.
+      * WAREHOUSE — «Складовщик»: orders and items of HIS OWN branch — assembly and
+                    receiving with weight (which creates the ``Sale``). No access to
+                    finance, reports or direct sales.
     """
 
     class Role(models.TextChoices):
@@ -61,7 +68,9 @@ class User(AbstractUser):
 
     @property
     def is_director(self) -> bool:
-        """«Директор» — read-only доступ к отчётам своего направления.
+        """«Директор» — отчёты (своё направление по умолчанию, оба по ``module=all``)
+        плюс ввод СВОИХ доходов/расходов и прихода на склад; правка существующих
+        записей и чужих данных запрещена — см. ``DirectorEntryAccess``.
 
         A superuser is never treated as a director (full access wins).
         """

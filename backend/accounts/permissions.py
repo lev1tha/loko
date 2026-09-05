@@ -53,9 +53,9 @@ class DenyOperatorOrDirector(BasePermission):
     """Authenticated access for everyone EXCEPT «Сотрудник» (operator) and
     «Директор» (director).
 
-    Directors are read-only and scoped to the ОПиУ/ОДДС reports of their own
-    direction — they must never reach the data viewsets (accounts, expenses,
-    transfers, deposits, debts, sales, settings, journal, balances, …).
+    Directors reach the reports and their own income/expense entries through
+    ``DirectorEntryAccess``; this class guards everything else from them
+    (accounts, transfers, deposits, debts, sales, client prices, settings, …).
     """
 
     message = "Недостаточно прав: раздел недоступен для этой роли."
@@ -180,9 +180,10 @@ class WorkflowAccess(BasePermission):
 class StockAccess(BasePermission):
     """Остаток веса на складе (``WarehouseStock``).
 
-    Единственное место, где директор ПИШЕТ: он ежедневно вносит приход кг на
-    склад. Admin / Manager — тоже. Складовщик и сотрудник — только ``summary``
-    своего филиала (строка «на складе сейчас»; филиал подставляет вьюсет).
+    Одно из двух мест, где директор ПИШЕТ (второе — доходы/расходы, см.
+    ``DirectorEntryAccess``): он ежедневно вносит приход кг на склад.
+    Admin / Manager — тоже. Складовщик и сотрудник — только ``summary`` своего
+    филиала (строка «на складе сейчас»; филиал подставляет вьюсет).
     Удаление — админ или автор записи (проверка в вьюсете).
     """
 

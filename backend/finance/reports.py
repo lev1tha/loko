@@ -80,11 +80,48 @@ def _by_branch(qs, branch):
     return qs.filter(branch=branch) if branch else qs
 
 
-def _sales(date_from, date_to, kinds, field, module=None, branch=None):
+# ---------------------------------------------------------------------------
+# Источник данных: собственные операции Loko vs история, перенесённая из Kargo Osh
+# ---------------------------------------------------------------------------
+SOURCE_LOKO = "loko"
+SOURCE_KARGO = "kargo"
+SOURCE_ALL = "all"
+
+
+def _by_source(qs, source):
+    """Фильтр ПРОДАЖ по источнику.
+
+    Импорт ``import_kargoosh`` создал только ``Sale`` и ``Account`` — расходы,
+    переводы, депозиты и прочий доход он не трогал, поэтому источник фильтруется
+    ровно в этих двух местах (см. ``_accounts_by_source``).
+
+    ``loko`` — операции, рождённые в Loko (в т.ч. заказы Kargo-цикла через
+    ``/api/kargo/``: это текущая работа, а не история). ``kargo`` — только
+    перенесённая история. ``all``/пусто — без фильтра.
+    """
+    if source == SOURCE_LOKO:
+        return qs.filter(legacy_kargo_id__isnull=True)
+    if source == SOURCE_KARGO:
+        return qs.filter(legacy_kargo_id__isnull=False)
+    return qs
+
+
+def _accounts_by_source(qs, source):
+    """То же для счетов: кассы, перенесённые из Kargo, помечены ``legacy_kargo_card_id``.
+    Их ``initial_balance`` — исторический остаток без журнала движений, поэтому в
+    сводке «только Loko» он не участвует."""
+    if source == SOURCE_LOKO:
+        return qs.filter(legacy_kargo_card_id__isnull=True)
+    if source == SOURCE_KARGO:
+        return qs.filter(legacy_kargo_card_id__isnull=False)
+    return qs
+
+
+def _sales(date_from, date_to, kinds, field, module=None, branch=None, source=None):
     from express.models import Sale
 
     qs = _by_branch(_by_module(Sale.objects.filter(account__kind__in=kinds), module), branch)
-    return _between(qs, date_from, date_to, field)
+    return _between(_by_source(qs, source), date_from, date_to, field)
 
 
 # ---------------------------------------------------------------------------
@@ -173,12 +210,12 @@ def _opex_breakdown(date_from, date_to, kinds, module=None, branch=None):
 # ===========================================================================
 # ОПиУ (P&L) — по начислению
 # ===========================================================================
-def _pnl_base(date_from, date_to, payment, module, branch=None):
+def _pnl_base(date_from, date_to, payment, module, branch=None, source=None):
     """Компоненты ОПиУ до строки налога (для заданного канала оплаты)."""
     if branch:
         module = "EXPRESS"   # филиал — только Express: Business-компоненты обнуляются
     kinds = _kinds_for_payment(payment)
-    sales = _sales(date_from, date_to, kinds, "date", module, branch)
+    sales = _sales(date_from, date_to, kinds, "date", module, branch, source)
     express_revenue = sales.aggregate(s=Sum("price_som"))["s"] or ZERO
     deposit_revenue, deposit_count = _recognized_deposits(date_from, date_to, kinds, module)
     other_income, other_income_count = _other_income(date_from, date_to, kinds, module, branch)
@@ -211,7 +248,7 @@ def _pnl_base(date_from, date_to, payment, module, branch=None):
     }
 
 
-def build_pnl(date_from=None, date_to=None, payment="all", tax_rate=None, module=None, branch=None):
+def build_pnl(date_from=None, date_to=None, payment="all", tax_rate=None, module=None, branch=None, source=None):
     """ОПиУ. Налог на «прибыль до налогов» по ставке канала оплаты:
     наличные cash_tax_rate (6%), безнал noncash_tax_rate (4%) — оба редактируемы.
     Для payment='all' каждый канал облагается своей ставкой и суммируется.
@@ -225,7 +262,7 @@ def build_pnl(date_from=None, date_to=None, payment="all", tax_rate=None, module
     noncash_rate = cfg.noncash_tax_rate
     single_pct = cfg.single_tax_pct
 
-    base = _pnl_base(date_from, date_to, payment, module, branch)
+    base = _pnl_base(date_from, date_to, payment, module, branch, source)
     pre = base["pre_tax_profit"]
 
     # Express — «единый налог» = % от ВЫРУЧКИ Express (документ-спецификация).
@@ -242,7 +279,7 @@ def build_pnl(date_from=None, date_to=None, payment="all", tax_rate=None, module
         def _btax(pay):
             if module == "EXPRESS":
                 return ZERO
-            bpre = _pnl_base(date_from, date_to, pay, "BUSINESS")["pre_tax_profit"]
+            bpre = _pnl_base(date_from, date_to, pay, "BUSINESS", source=source)["pre_tax_profit"]
             rate = cash_rate if pay == "cash" else noncash_rate
             return (max(bpre, ZERO) * rate / Decimal("100")).quantize(ZERO)
 
@@ -289,7 +326,7 @@ def build_pnl(date_from=None, date_to=None, payment="all", tax_rate=None, module
 # ===========================================================================
 # Cash helpers for opening / closing balances (consolidated KGS)
 # ===========================================================================
-def _consolidated_cash(upper_date, inclusive, module=None, kinds=None):
+def _consolidated_cash(upper_date, inclusive, module=None, kinds=None, source=None):
     """Consolidated KGS cash counting flows up to a boundary date.
 
     inclusive=True → flows with date <= upper_date (closing).
@@ -306,7 +343,7 @@ def _consolidated_cash(upper_date, inclusive, module=None, kinds=None):
         return qs.filter(**{f"{field}__{op}": upper_date})
 
     total = ZERO
-    accounts = Account.objects.all()
+    accounts = _accounts_by_source(Account.objects.all(), source)
     if module:
         accounts = accounts.filter(module=module)
     if kinds:
@@ -315,7 +352,7 @@ def _consolidated_cash(upper_date, inclusive, module=None, kinds=None):
         cny = acc.currency == Currency.CNY
         total += acc.initial_balance * (acc.initial_kgs_rate or ONE) if cny else acc.initial_balance
         # Продажи (Express) всегда в сомах.
-        total += filt(acc.sales, "payment_date").aggregate(s=Sum("paid_som"))["s"] or ZERO
+        total += filt(_by_source(acc.sales, source), "payment_date").aggregate(s=Sum("paid_som"))["s"] or ZERO
         # Прочий доход — по снапшот-курсу счёта.
         for g in filt(acc.other_incomes, "date").values("kgs_rate").annotate(s=Sum("amount")):
             total += kgs_of(g["s"] or ZERO, acc.currency, g["kgs_rate"])
@@ -347,7 +384,7 @@ def _consolidated_cash(upper_date, inclusive, module=None, kinds=None):
 # ===========================================================================
 # ОДДС (Cash Flow) — пересказ ОПиУ по видам деятельности (документ-спецификация)
 # ===========================================================================
-def build_cashflow(date_from=None, date_to=None, payment="all", module=None, opening_override=None, branch=None):
+def build_cashflow(date_from=None, date_to=None, payment="all", module=None, opening_override=None, branch=None, source=None):
     """ОДДС по документу-спецификации: пересказ ОПиУ по трём видам деятельности
     (а НЕ кассовый отчёт по оплате). Решение пользователя 2026-06-29 — операционный
     раздел берёт цифры из ОПиУ, налог на прибыль показан в финансовой деятельности.
@@ -362,7 +399,7 @@ def build_cashflow(date_from=None, date_to=None, payment="all", module=None, ope
     kinds = _kinds_for_payment(payment)
 
     # --- Операционная деятельность: берётся из ОПиУ ------------------------
-    pnl = build_pnl(date_from, date_to, payment, module=module, branch=branch)
+    pnl = build_pnl(date_from, date_to, payment, module=module, branch=branch, source=source)
     revenue = pnl["revenue"]                  # «Денежные потоки от деятельности»
     cogs = pnl["cogs"]                        # «Расходы на себестоимость продукции» (55%)
     operating_expenses = pnl["operating_expenses"]
@@ -391,7 +428,7 @@ def build_cashflow(date_from=None, date_to=None, payment="all", module=None, ope
     if opening_override is not None:
         opening = opening_override
     else:
-        opening = _consolidated_cash(date_from, inclusive=False, module=module, kinds=kinds)
+        opening = _consolidated_cash(date_from, inclusive=False, module=module, kinds=kinds, source=source)
     closing = opening + net_cash_flow
 
     fin_cnt = sum((v["count"] for v in financing_articles.values()), 0)
@@ -422,13 +459,13 @@ def build_cashflow(date_from=None, date_to=None, payment="all", module=None, ope
         "financing_articles": financing_articles,
         "net_cash_flow": net_cash_flow,
         "closing_balance": closing,
-        "payment_breakdown": _payment_breakdown(date_from, date_to, module, branch),
+        "payment_breakdown": _payment_breakdown(date_from, date_to, module, branch, source),
         "balances_company_wide": bool(branch),
         "operations": {"income": pnl["operations"]["income"], "expense": expense_count},
     }
 
 
-def build_monthly(date_from=None, date_to=None, module=None, report="pnl", branch=None):
+def build_monthly(date_from=None, date_to=None, module=None, report="pnl", branch=None, source=None):
     """Помесячная разбивка отчёта (месяцы периода = колонки). Каждый месяц считается
     отдельным вызовом build_pnl/build_cashflow — как просит документ («на каждый месяц»)."""
     from datetime import date as _date
@@ -448,7 +485,7 @@ def build_monthly(date_from=None, date_to=None, module=None, report="pnl", branc
             last = cur.replace(day=calendar.monthrange(cur.year, cur.month)[1])
             m_from, m_to = max(cur, df), min(last, dtt)
             if report == "cashflow":
-                d = build_cashflow(m_from, m_to, module=module, branch=branch)
+                d = build_cashflow(m_from, m_to, module=module, branch=branch, source=source)
                 months.append({
                     "month": cur.strftime("%Y-%m"),
                     "operating_inflow": d["operating_inflow"], "net_operating": d["net_operating"],
@@ -457,7 +494,7 @@ def build_monthly(date_from=None, date_to=None, module=None, report="pnl", branc
                     "opening_balance": d["opening_balance"], "closing_balance": d["closing_balance"],
                 })
             else:
-                d = build_pnl(m_from, m_to, module=module, branch=branch)
+                d = build_pnl(m_from, m_to, module=module, branch=branch, source=source)
                 months.append({
                     "month": cur.strftime("%Y-%m"),
                     "revenue": d["revenue"], "cogs": d["cogs"], "gross_profit": d["gross_profit"],
@@ -468,12 +505,14 @@ def build_monthly(date_from=None, date_to=None, module=None, report="pnl", branc
     return {"report": report, "module": module, "months": months}
 
 
-def _payment_breakdown(date_from, date_to, module=None, branch=None):
+def _payment_breakdown(date_from, date_to, module=None, branch=None, source=None):
     """Свод оплат: приход/расход по каждому счёту (методу), в KGS, по оплате."""
     rows = []
-    accounts = Account.objects.filter(module=module) if module else Account.objects.all()
+    accounts = _accounts_by_source(Account.objects.all(), source)
+    if module:
+        accounts = accounts.filter(module=module)
     for acc in accounts:
-        sales_q = acc.sales.filter(branch=branch) if branch else acc.sales.all()
+        sales_q = _by_source(acc.sales.filter(branch=branch) if branch else acc.sales.all(), source)
         exp_q = acc.expenses.filter(branch=branch) if branch else acc.expenses.all()
         sales_in = _between(sales_q, date_from, date_to, "payment_date")
         dep_in = _between(acc.deposits.all(), date_from, date_to, "date")
@@ -515,8 +554,8 @@ def _payment_breakdown(date_from, date_to, module=None, branch=None):
 # ===========================================================================
 # Balances & debts
 # ===========================================================================
-def accounts_snapshot(module=None):
-    qs = Account.objects.all()
+def accounts_snapshot(module=None, source=None):
+    qs = _accounts_by_source(Account.objects.all(), source)
     if module:
         qs = qs.filter(module=module)
     result = []
@@ -696,7 +735,7 @@ _JOURNAL_PAGE = 500   # размер страницы по умолчанию
 _JOURNAL_MAX = 2000   # максимум строк за один запрос (защита); итоги — по ВСЕМ операциям
 
 
-def journal(date_from=None, date_to=None, module=None, effect_filter=None, limit=None, offset=0, branch=None):
+def journal(date_from=None, date_to=None, module=None, effect_filter=None, limit=None, offset=0, branch=None, source=None):
     """Единый хронологический журнал всех операций с фильтром по направлению:
       * Express — продажи (Sale) + расходы карго (Expense).
       * Business — приходы/авансы/погашения (Deposit), закуп/аванс/изъятие/прочее
@@ -726,7 +765,7 @@ def journal(date_from=None, date_to=None, module=None, effect_filter=None, limit
     # Продажи Express → выручка (+ динамическая себестоимость, если задана) —
     # себестоимость живёт на самой продаже (Sale.cost_som), а не отдельным расходом.
     if want("EXPRESS"):
-        sales = Sale.objects.filter(account__module="EXPRESS").select_related("account")
+        sales = _by_source(Sale.objects.filter(account__module="EXPRESS"), source).select_related("account")
         if branch:
             sales = sales.filter(branch=branch)
         for s in _between(sales, date_from, date_to, "date"):
@@ -866,7 +905,7 @@ BREAKDOWN_LABELS = {
 }
 
 
-def breakdown(line, date_from=None, date_to=None, payment="all", module=None, basis="accrual", branch=None):
+def breakdown(line, date_from=None, date_to=None, payment="all", module=None, basis="accrual", branch=None, source=None):
     """Список операций, из которых сложилась строка отчёта.
 
     basis: 'accrual' (ОПиУ, по дате операции/начислению) | 'cash' (ОДДС, по дате оплаты/оплате).
@@ -889,7 +928,7 @@ def breakdown(line, date_from=None, date_to=None, payment="all", module=None, ba
     def sale_items(value_field=sale_amt):
         is_cost = value_field == "cost_som"
         kind = "Себестоимость карго" if is_cost else "Продажа Express"
-        qs = _by_branch(_by_module(Sale.objects.filter(account__kind__in=kinds), module), branch).select_related("account")
+        qs = _by_source(_by_branch(_by_module(Sale.objects.filter(account__kind__in=kinds), module), branch), source).select_related("account")
         for s in _between(qs, date_from, date_to, sale_date).order_by("-" + sale_date):
             amt = getattr(s, value_field)
             if not amt:

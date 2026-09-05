@@ -17,6 +17,9 @@ from accounts.permissions import DenyOperator, DenyOperatorOrDirector, DirectorE
 from .bonuses import build_bonuses
 from .models import Account, AppSettings, Branch, EmployeeBonus, Expense, OtherIncome, Transfer
 from .reports import (
+    SOURCE_ALL,
+    SOURCE_KARGO,
+    SOURCE_LOKO,
     accounts_snapshot,
     breakdown,
     build_cashflow,
@@ -44,6 +47,26 @@ def _period_params(request):
     if payment not in ("all", "cash", "noncash"):
         payment = "all"
     return date_from, date_to, payment
+
+
+def _source_param(request):
+    """Источник данных отчёта: ``loko`` (по умолчанию) | ``kargo`` | ``all``.
+
+    После переноса истории Kargo Osh (171k заказов, 245 млн сом) сводные отчёты
+    без фильтра показывали текущую работу Loko вперемешку с чужой историей.
+    Поэтому ДЕФОЛТ — ``loko``: дашборд и отчёты ведут себя как до импорта.
+    ``kargo`` — только перенесённая история, ``all`` — всё вместе.
+    """
+    raw = (request.query_params.get("source") or SOURCE_LOKO).lower()
+    if raw == SOURCE_ALL:
+        return None
+    return raw if raw in (SOURCE_LOKO, SOURCE_KARGO) else SOURCE_LOKO
+
+
+SOURCE_PARAM = OpenApiParameter(
+    "source", OpenApiTypes.STR, enum=["loko", "kargo", "all"],
+    description="Источник: loko — операции Loko (по умолчанию), kargo — история Kargo Osh, all — всё",
+)
 
 
 def _scoped_module(request):
@@ -336,6 +359,7 @@ class TransferViewSet(viewsets.ModelViewSet):
 
 @extend_schema(
     parameters=PERIOD_PARAMS
+    + [SOURCE_PARAM]
     + [OpenApiParameter("tax_rate", OpenApiTypes.NUMBER, description="Ставка налога %, пусто = из настроек")],
     responses=OpenApiTypes.OBJECT,
     tags=["reports"],
@@ -356,11 +380,13 @@ def pnl_report(request):
                 tax_rate = None
         except (InvalidOperation, ValueError, TypeError):
             tax_rate = None
-    return Response(build_pnl(date_from, date_to, payment, tax_rate=tax_rate, module=module, branch=branch))
+    return Response(build_pnl(date_from, date_to, payment, tax_rate=tax_rate, module=module, branch=branch,
+                              source=_source_param(request)))
 
 
 @extend_schema(
     parameters=PERIOD_PARAMS
+    + [SOURCE_PARAM]
     + [OpenApiParameter("opening", OpenApiTypes.NUMBER, description="Остаток на начало вручную (перенос с прошлого месяца)")],
     responses=OpenApiTypes.OBJECT,
     tags=["reports"],
@@ -378,11 +404,13 @@ def cashflow_report(request):
             opening_override = Decimal(str(raw))
         except (InvalidOperation, ValueError, TypeError):
             opening_override = None
-    return Response(build_cashflow(date_from, date_to, payment, module=module, opening_override=opening_override, branch=branch))
+    return Response(build_cashflow(date_from, date_to, payment, module=module, opening_override=opening_override,
+                                   branch=branch, source=_source_param(request)))
 
 
 @extend_schema(
     parameters=PERIOD_PARAMS
+    + [SOURCE_PARAM]
     + [
         OpenApiParameter("module", OpenApiTypes.STR, enum=["EXPRESS", "BUSINESS"], description="Направление"),
         OpenApiParameter("report", OpenApiTypes.STR, enum=["pnl", "cashflow"], description="Какой отчёт разбить по месяцам"),
@@ -399,11 +427,12 @@ def monthly_report(request):
     report = request.query_params.get("report", "pnl")
     if report not in ("pnl", "cashflow"):
         report = "pnl"
-    return Response(build_monthly(date_from, date_to, module=module, report=report, branch=branch))
+    return Response(build_monthly(date_from, date_to, module=module, report=report, branch=branch,
+                                  source=_source_param(request)))
 
 
 @extend_schema(
-    parameters=[OpenApiParameter("module", OpenApiTypes.STR, enum=["EXPRESS", "BUSINESS"], description="Направление")],
+    parameters=[OpenApiParameter("module", OpenApiTypes.STR, enum=["EXPRESS", "BUSINESS"], description="Направление"), SOURCE_PARAM],
     responses=OpenApiTypes.OBJECT,
     tags=["reports"],
 )
@@ -411,7 +440,7 @@ def monthly_report(request):
 @permission_classes([DenyOperatorOrDirector])
 def balances(request):
     module = request.query_params.get("module")
-    return Response(accounts_snapshot(module=module))
+    return Response(accounts_snapshot(module=module, source=_source_param(request)))
 
 
 @extend_schema(responses=OpenApiTypes.OBJECT, tags=["reports"])
@@ -431,6 +460,7 @@ def business_orders_report(request):
 
 @extend_schema(
     parameters=PERIOD_PARAMS
+    + [SOURCE_PARAM]
     + [
         OpenApiParameter("module", OpenApiTypes.STR, enum=["EXPRESS", "BUSINESS"], description="Направление"),
         OpenApiParameter("effect", OpenApiTypes.STR, description="Фильтр строк по эффекту (Выручка/Опер. расход/…)"),
@@ -457,11 +487,13 @@ def journal_report(request):
     return Response(journal(
         date_from, date_to, module=module, effect_filter=effect,
         limit=_int("limit", 500), offset=_int("offset", 0), branch=branch,
+        source=_source_param(request),
     ))
 
 
 @extend_schema(
     parameters=PERIOD_PARAMS
+    + [SOURCE_PARAM]
     + [
         OpenApiParameter(
             "line",
@@ -482,7 +514,8 @@ def breakdown_report(request):
     module = _scoped_module(request)
     branch = _scoped_branch(request)
     basis = request.query_params.get("basis", "accrual")
-    return Response(breakdown(line, date_from, date_to, payment, module, basis, branch=branch))
+    return Response(breakdown(line, date_from, date_to, payment, module, basis, branch=branch,
+                              source=_source_param(request)))
 
 
 @extend_schema(

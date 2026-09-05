@@ -17,6 +17,13 @@ const MODULES = [
   { value: 'EXPRESS', label: 'Express' },
   { value: 'BUSINESS', label: 'Business' },
 ]
+// Источник данных. После переноса истории Kargo Osh (171k заказов) сводные цифры
+// смешивали текущую работу Loko с чужой историей — по умолчанию показываем только Loko.
+const SOURCES = [
+  { value: 'loko', label: 'Loko' },
+  { value: 'kargo', label: 'История Kargo' },
+  { value: 'all', label: 'Всё' },
+]
 const VIEWS = [
   { value: 'period', label: 'За период' },
   { value: 'monthly', label: 'Помесячно' },
@@ -49,6 +56,7 @@ export default function Reports({ lockedModule = null, initialModule = 'all' }) 
   const [view, setView] = useState('period') // 'period' | 'monthly'
   const [drill, setDrill] = useState(null) // { line, label, basis }
   const [branch, setBranch] = useState('') // '' = все филиалы (только Express)
+  const [source, setSource] = useState('loko') // 'loko' | 'kargo' | 'all'
 
   // На страницах внутри разделов Express/Business направление зафиксировано
   // (проп lockedModule) — переключатель «Направление» скрыт.
@@ -58,10 +66,13 @@ export default function Reports({ lockedModule = null, initialModule = 'all' }) 
   const showBranch = module === 'EXPRESS'
   const branches = asList(useFetch('/branches/', { active: 1 }).data)
   const branchParam = showBranch && branch ? { branch } : {}
-  const pnlParams = { from, to, payment, ...moduleParam, ...branchParam, ...(taxRate !== '' ? { tax_rate: taxRate } : {}) }
+  // Источник касается только Express: история Kargo — карго-заказы, у Business её нет.
+  const showSource = module === 'EXPRESS'
+  const sourceParam = showSource ? { source } : {}
+  const pnlParams = { from, to, payment, ...moduleParam, ...branchParam, ...sourceParam, ...(taxRate !== '' ? { tax_rate: taxRate } : {}) }
   const pnl = useFetch('/reports/pnl/', pnlParams)
-  const cash = useFetch('/reports/cashflow/', { from, to, payment, ...moduleParam, ...branchParam, ...(opening !== '' ? { opening } : {}) })
-  const monthly = useFetch('/reports/monthly/', { from, to, report, ...moduleParam, ...branchParam })
+  const cash = useFetch('/reports/cashflow/', { from, to, payment, ...moduleParam, ...branchParam, ...sourceParam, ...(opening !== '' ? { opening } : {}) })
+  const monthly = useFetch('/reports/monthly/', { from, to, report, ...moduleParam, ...branchParam, ...sourceParam })
 
   const openDrill = (basis) => (line, label) => setDrill({ line, label, basis })
 
@@ -88,6 +99,12 @@ export default function Reports({ lockedModule = null, initialModule = 'all' }) 
                 {branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
               </select>
             </Field>
+          )}
+          {showSource && (
+            <div className="field">
+              <span className="field-label">Источник</span>
+              <Segmented value={source} onChange={setSource} options={SOURCES} />
+            </div>
           )}
           <div className="field">
             <span className="field-label">Расчёт</span>
@@ -133,7 +150,7 @@ export default function Reports({ lockedModule = null, initialModule = 'all' }) 
       {drill && (
         <BreakdownModal
           {...drill}
-          params={{ from, to, payment, ...moduleParam, ...branchParam }}
+          params={{ from, to, payment, ...moduleParam, ...branchParam, ...sourceParam }}
           onClose={() => setDrill(null)}
         />
       )}
