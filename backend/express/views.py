@@ -513,9 +513,10 @@ class WarehouseOrderViewSet(viewsets.ModelViewSet):
             qs = qs.filter(origin=origin)
         if params.get("active") in ("1", "true", "True"):
             qs = qs.exclude(status__in=[WarehouseOrder.Status.ISSUED, WarehouseOrder.Status.CANCELLED])
-        # Дневная сборка: только заявки, где есть неоприходованные позиции «в поиске».
+        # Дневная сборка: заявки с позициями «в поиске» или уже найденными, но ещё не
+        # оприходованными сотрудником (складовщик видит, что ждёт взвешивания).
         if params.get("active_items") in ("1", "true", "True"):
-            qs = qs.filter(items__status=WarehouseItem.Status.IN_SEARCH).distinct()
+            qs = qs.filter(items__status__in=[WarehouseItem.Status.IN_SEARCH, WarehouseItem.Status.LOCATED]).distinct()
         search = (params.get("search") or "").strip().lower()
         if search:
             ids = [o.id for o in qs if any(search in str(c).lower() for c in (o.client_codes or []))]
@@ -607,7 +608,12 @@ class WarehouseItemViewSet(viewsets.ReadOnlyModelViewSet):
         if getattr(user, "is_warehouse", False):
             qs = qs.filter(order__branch=user.branch) if user.branch_id else qs.none()
         elif getattr(user, "is_operator", False):
-            qs = qs.filter(order__created_by=user)
+            # Свои заявки + ничьи заявки клиентов своей точки (их сотрудник может оприходовать
+            # и тем самым закрепить за собой).
+            own = Q(order__created_by=user)
+            if user.branch_id:
+                own |= Q(order__created_by__isnull=True, order__branch=user.branch)
+            qs = qs.filter(own)
         # менеджер/админ — все позиции
         status = self.request.query_params.get("status")
         if status:
@@ -622,13 +628,21 @@ class WarehouseItemViewSet(viewsets.ReadOnlyModelViewSet):
         item = self.get_object()
         if item.status in WarehouseItem.FINANCIAL:
             raise serializers.ValidationError({"status": "Позиция уже оприходована."})
+        user = request.user
+        if getattr(user, "is_operator", False) and item.status != WarehouseItem.Status.LOCATED:
+            raise serializers.ValidationError(
+                {"status": "Оприходовать можно только позицию, которую склад отметил «Найдено»."}
+            )
         ser = WarehouseReceiveSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
-        # Заявка клиента (QR) ещё никому не закреплена — закрепляем за сотрудником
-        # филиала: единственным автоматически, иначе тем, кого выбрал складовщик.
+        # Заявка клиента (QR) ещё никому не закреплена — закрепляем за сотрудником:
+        # оприходует сотрудник — за ним; кассир/админ — за выбранным или единственным.
         order = item.order
         if order.created_by_id is None:
-            operator = ser.validated_data.get("operator") or WarehouseOrder.resolve_operator(order.branch)
+            if getattr(user, "is_operator", False):
+                operator = user
+            else:
+                operator = ser.validated_data.get("operator") or WarehouseOrder.resolve_operator(order.branch)
             if operator is None:
                 raise serializers.ValidationError(
                     {"operator": "Выберите сотрудника, кому засчитать заявку клиента."}
@@ -640,6 +654,17 @@ class WarehouseItemViewSet(viewsets.ReadOnlyModelViewSet):
             ser.validated_data["weight_kg"], ser.validated_data["account"], by_user=request.user,
             tracking_number=ser.validated_data.get("tracking_number") or None,
         )
+        return Response(WarehouseItemSerializer(item).data)
+
+    @extend_schema(request=None, responses=WarehouseItemSerializer)
+    @action(detail=True, methods=["post"])
+    def locate(self, request, pk=None):
+        """Складовщик нашёл посылку → «Найдено, к оприходованию». Денег ещё нет:
+        вес и продажу вносит сотрудник (``receive``)."""
+        item = self.get_object()
+        if item.status in WarehouseItem.FINANCIAL:
+            raise serializers.ValidationError({"status": "Позиция уже оприходована."})
+        item.locate(by_user=request.user)
         return Response(WarehouseItemSerializer(item).data)
 
     @extend_schema(request=WarehouseNotFoundSerializer, responses=WarehouseItemSerializer)

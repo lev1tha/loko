@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import api, { errorMessage } from '../api/client'
-import { som, kg } from '../lib/format'
+import { som } from '../lib/format'
 import { Alert, Segmented } from '../components/ui'
 import { LoadingTruck } from '../components/states'
+import { OperatorItemRow, ReceiveModal } from '../components/OperatorItems'
 
 // Позиции найдены и оприходованы складом (в чеке клиента, с суммой).
 const FOUND = new Set(['FOUND', 'DELIVERED'])
@@ -20,6 +21,7 @@ export default function OperatorMySales() {
   const [data, setData] = useState({ count: 0, results: [] })
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId] = useState(null)
+  const [receiveItem, setReceiveItem] = useState(null)
   const [error, setError] = useState('')
   const [period, setPeriod] = useState('month') // month | prev | all
 
@@ -80,40 +82,13 @@ export default function OperatorMySales() {
         <p className="muted" style={{ margin: 0 }}>В этом месяце заявок пока нет.</p>
       ) : (
         <div className="operator-sales">
-          {rows.map((s) => {
-            const found = FOUND.has(s.status)
-            return (
-              <div key={s.id} className={`operator-sales-row wh-row-${s.status.toLowerCase()}`}>
-                <div className="operator-sales-main">
-                  <span className="operator-sales-code">{s.client_code}</span>
-                  <span className="operator-sales-meta">
-                    {found
-                      ? `оприходовано${s.weight_kg ? ` · ${kg(s.weight_kg)}` : ''}`
-                      : s.status === 'NOT_FOUND'
-                        ? `не найдено${s.reason ? ` · ${s.reason}` : ''}`
-                        : s.status === 'EVENING'
-                          ? 'убрано из чека · вечерний допоиск'
-                          : 'в поиске'}
-                  </span>
-                </div>
-
-                {found && <span className="operator-sales-sum">{som(s.price_som)}</span>}
-
-                {s.status === 'NOT_FOUND' && (
-                  <button
-                    type="button"
-                    className="btn btn-icon wh-remove"
-                    title="Убрать из чека (в вечерний допоиск)"
-                    disabled={busyId === s.id}
-                    onClick={() => dismiss(s)}
-                  >
-                    ✕
-                  </button>
-                )}
-              </div>
-            )
-          })}
+          {rows.map((it) => (
+            <OperatorItemRow key={it.id} item={it} busyId={busyId} onReceive={setReceiveItem} onDismiss={dismiss} />
+          ))}
         </div>
+      )}
+      {receiveItem && (
+        <ReceiveModal item={receiveItem} onClose={() => setReceiveItem(null)} onDone={() => { setReceiveItem(null); load() }} />
       )}
     </div>
   )

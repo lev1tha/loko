@@ -390,13 +390,14 @@ class WarehouseItem(models.Model):
     class Status(models.TextChoices):
         EXPECTED = "EXPECTED", "Ожидается"      # посылка известна из Kargoosh («в пути»), ещё не на складе
         IN_SEARCH = "IN_SEARCH", "В поиске"
-        FOUND = "FOUND", "Найдено"
+        LOCATED = "LOCATED", "Найдено, к оприходованию"   # складовщик нашёл; вес и продажу вносит сотрудник
+        FOUND = "FOUND", "Оприходовано"
         NOT_FOUND = "NOT_FOUND", "Не найдено"
         EVENING = "EVENING", "Вечерний допоиск"
         DELIVERED = "DELIVERED", "Выдано"
 
     # Статусы «до оприходования» — позиция без денег.
-    OPEN = {"EXPECTED", "IN_SEARCH", "NOT_FOUND", "EVENING"}
+    OPEN = {"EXPECTED", "IN_SEARCH", "LOCATED", "NOT_FOUND", "EVENING"}
 
     # Статусы, для которых существует официальная продажа (учитываются финансами).
     FINANCIAL = {Status.FOUND, Status.DELIVERED}
@@ -416,9 +417,15 @@ class WarehouseItem(models.Model):
         related_name="warehouse_item", verbose_name="Продажа (создаётся при оприходовании)",
     )
     reason = models.CharField(max_length=255, blank=True, verbose_name="Причина (не найдено)")
+    # Складовщик, который нашёл посылку («Найдено»); ему засчитываются кг склада.
     found_by = models.ForeignKey(
         dj_settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
-        related_name="warehouse_items_found", verbose_name="Оприходовал",
+        related_name="warehouse_items_found", verbose_name="Нашёл (складовщик)",
+    )
+    # Сотрудник, который взвесил и оприходовал (создал продажу).
+    received_by = models.ForeignKey(
+        dj_settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="warehouse_items_received", verbose_name="Оприходовал (сотрудник)",
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -480,10 +487,20 @@ class WarehouseItem(models.Model):
             self.sale = sale
             self.weight_kg = weight
             self.reason = ""
-            self.found_by = by_user
+            # Кто нашёл — остаётся складовщик (если нажимал «Найдено»); кто оприходовал — текущий.
+            if self.found_by_id is None:
+                self.found_by = by_user
+            self.received_by = by_user
             self.status = self.Status.FOUND
             self.save()
         return sale
+
+    def locate(self, by_user=None):
+        """Складовщик нашёл посылку: без денег, ждёт взвешивания и оприходования сотрудником."""
+        self.status = self.Status.LOCATED
+        self.reason = ""
+        self.found_by = by_user
+        self.save(update_fields=["status", "reason", "found_by", "updated_at"])
 
     def mark_not_found(self, reason, by_user=None):
         """Отметить, что товара нет на складе (без создания продажи)."""

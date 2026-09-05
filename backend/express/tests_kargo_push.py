@@ -156,6 +156,8 @@ class PushTests(Base):
         o = WarehouseOrder.objects.create(branch=self.b_loko, created_by=self.op, client_codes=["AL-12345"])
         it = WarehouseItem.objects.create(order=o, client_code="AL-12345")
         self.client.force_authenticate(self.wh)
+        self.client.post(f"/api/warehouse-items/{it.id}/locate/")
+        self.client.force_authenticate(self.op)
         r = self.client.post(f"/api/warehouse-items/{it.id}/receive/", {"weight_kg": "1", "account": self.acc.id, "tracking_number": "TAKEN"}, format="json")
         self.assertEqual(r.status_code, 400)
         r = self.client.post(f"/api/warehouse-items/{it.id}/receive/", {"weight_kg": "1", "account": self.acc.id, "tracking_number": " NEW-1 "}, format="json")

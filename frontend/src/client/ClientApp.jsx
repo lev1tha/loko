@@ -345,9 +345,9 @@ function ItemCard({ item }) {
     return (
       <div className="item rise">
         <div className="item-top"><div className="code"><span className="l">Код</span>{item.client_code}</div>
-          <span className="badge b-wait"><span className="dot" />В пути · ищем</span></div>
+          <span className="badge b-wait"><span className="dot" />{item.status === 'LOCATED' ? 'Нашли · взвешиваем' : 'В пути · ищем'}</span></div>
         {rail('search')}
-        <div className="note">Груз ещё не оприходован. Обычно 1–2 дня — статус обновится сам.</div>
+        <div className="note">{item.status === 'LOCATED' ? 'Посылка найдена, сотрудник взвешивает — сумма появится через минуту.' : 'Груз ещё не оприходован. Обычно 1–2 дня — статус обновится сам.'}</div>
       </div>
     )
   }

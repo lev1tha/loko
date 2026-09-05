@@ -109,6 +109,20 @@ export default function WarehouseDashboard() {
     }
   }
 
+  // Складовщик нашёл посылку: без денег, вес и продажу вносит сотрудник.
+  async function locate(item) {
+    setBusyId(item.id)
+    setError('')
+    try {
+      await api.post(`/warehouse-items/${item.id}/locate/`)
+      dayReq.reload(); eveningReq.reload(); expectedReq.reload()
+    } catch (err) {
+      setError(errorMessage(err))
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   async function markNotFound(item) {
     const reason = await prompt({
       title: `Не найдено · ${item.client_code}`, label: 'Что не найдено / где искали', okLabel: 'Отметить «не найдено»',
@@ -139,7 +153,7 @@ export default function WarehouseDashboard() {
     )
   }
 
-  const itemProps = { busyId, onReceive: openReceive, onNotFound: markNotFound }
+  const itemProps = { busyId, onReceive: openReceive, onNotFound: markNotFound, onLocate: locate, canReceive: !isWarehouse }
 
   return (
     <div className="wh-page">
@@ -326,8 +340,9 @@ function OrderCard({ order, showBranch, ...itemProps }) {
 }
 
 // Строка позиции: код + статус + действия (оприходовать / не найдено) либо сумма.
-function ItemRow({ item, showBranch, busyId, onReceive, onNotFound }) {
+function ItemRow({ item, showBranch, busyId, onReceive, onNotFound, onLocate, canReceive }) {
   const found = isFound(item.status)
+  const located = item.status === 'LOCATED'
   return (
     <div className={`wh-item wh-row-${item.status.toLowerCase()}`}>
       <div className="wh-item-main">
@@ -352,13 +367,17 @@ function ItemRow({ item, showBranch, busyId, onReceive, onNotFound }) {
         </div>
       ) : (
         <div className="wh-item-actions">
-          <button
-            className="btn btn-primary btn-sm"
-            disabled={busyId === item.id}
-            onClick={() => onReceive(item)}
-          >
-            Оприходовать
-          </button>
+          {located && <span className="muted" style={{ fontSize: 13 }}>ждёт оприходования сотрудником{item.found_by_name ? ` · нашёл ${item.found_by_name}` : ''}</span>}
+          {!located && (
+            <button className="btn btn-primary btn-sm" disabled={busyId === item.id} onClick={() => onLocate(item)}>
+              Найдено
+            </button>
+          )}
+          {canReceive && (
+            <button className="btn btn-secondary btn-sm" disabled={busyId === item.id} onClick={() => onReceive(item)}>
+              Оприходовать
+            </button>
+          )}
           {item.status !== 'EXPECTED' && (
             <button
               className="btn btn-ghost btn-sm"

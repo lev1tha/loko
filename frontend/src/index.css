@@ -681,6 +681,8 @@ textarea.input { height: auto; padding: 10px 14px; resize: vertical; min-height:
 .wh-row-evening { background: #FBE9D0; }
 .wh-row-in_search { background: #F6F8FA; }
 .wh-row-expected { background: #EEF2FF; }
+.wh-row-located { background: #DBEAFE; }
+.wh-status-located { background: #bfdbfe; color: #1e3a8a; }
 .wh-status-expected { background: #e0e7ff; color: #3730a3; }
 .wh-track { font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--muted); }
 .wh-stock { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-top: 10px; padding: 10px 14px; border-radius: var(--r-md); background: var(--canvas); border: 1px solid var(--hairline); font-size: 14px; }

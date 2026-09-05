@@ -72,8 +72,12 @@ class BoardAndReceiveTests(Base):
         r = self.client.get("/api/warehouse-orders/")
         self.assertEqual([o["origin"] for o in r.data["results"]], ["KARGO"])
         before = Sale.objects.count()
+        r = self.client.post(f"/api/warehouse-items/{item.id}/locate/")      # склад: «найдено»
+        self.assertEqual(r.status_code, 200, r.data)
+        self.client.force_authenticate(self.op)                                # сотрудник взвешивает
         r = self.client.post(f"/api/warehouse-items/{item.id}/receive/", {"weight_kg": "2", "account": self.acc.id}, format="json")
         self.assertEqual(r.status_code, 200, r.data)
+        self.client.force_authenticate(self.wh)
         self.assertEqual(Sale.objects.count(), before)                # новой продажи НЕТ
         s.refresh_from_db()
         self.assertEqual((s.weight_kg, s.price_som, s.paid_som, s.delivery_status, s.legacy_kargo_id, s.branch, s.created_by),
@@ -120,6 +124,8 @@ class BoardAndReceiveTests(Base):
         o = WarehouseOrder.objects.create(branch=self.loko_osh, created_by=self.op, client_codes=["ZZ-1"])
         it = WarehouseItem.objects.create(order=o, client_code="ZZ-1")
         self.client.force_authenticate(self.wh)
+        self.client.post(f"/api/warehouse-items/{it.id}/locate/")
+        self.client.force_authenticate(self.op)
         r = self.client.post(f"/api/warehouse-items/{it.id}/receive/", {"weight_kg": "1", "account": self.acc.id}, format="json")
         self.assertEqual(r.status_code, 200, r.data)
         self.assertEqual(Sale.objects.filter(client_code="ZZ-1").count(), 1)

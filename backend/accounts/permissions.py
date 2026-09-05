@@ -123,18 +123,21 @@ class WarehouseAccess(BasePermission):
 class WarehouseItemAccess(BasePermission):
     """Позиции складской заявки (двухэтапный учёт карго).
 
-    * Складовщик — позиции СВОЕГО филиала: список/просмотр, оприходование
-      (``receive`` / ``not_found`` / ``deliver``) и пикер счёта (``accounts``).
-    * Оператор — СВОИ позиции: список (``mine``) и отправка не найденной в вечерний
-      допоиск (``to_evening``). Финансовых цифр чужих позиций не видит.
+    * Складовщик — позиции СВОЕГО филиала: список/просмотр, «найдено» (``locate``),
+      «не найдено» (``not_found``), выдача (``deliver``), пикер сотрудников.
+    * Оператор — СВОИ позиции: список (``mine``), оприходование найденного
+      (``receive``: вес → продажа, пикер счёта ``accounts``) и отправка не найденной
+      в вечерний допоиск (``to_evening``). Финансовых цифр чужих позиций не видит.
     * Директор — нет доступа. Менеджер / админ — полный доступ.
     Фильтрация «только своё» — в ``get_queryset`` вьюсета (object-level).
     """
 
     message = "Недостаточно прав для позиций склада."
 
-    WAREHOUSE_ACTIONS = {"list", "retrieve", "receive", "not_found", "deliver", "accounts", "operators"}
-    OPERATOR_ACTIONS = {"mine", "to_evening"}
+    # Складовщик: ищет и отмечает «найдено» / «не найдено»; вес и продажу вносит сотрудник.
+    WAREHOUSE_ACTIONS = {"list", "retrieve", "locate", "not_found", "deliver", "operators"}
+    # Сотрудник: свои позиции, оприходование найденного (вес → продажа), крестик в вечерний.
+    OPERATOR_ACTIONS = {"mine", "to_evening", "receive", "accounts"}
 
     def has_permission(self, request, view):
         user = request.user

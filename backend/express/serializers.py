@@ -178,12 +178,15 @@ class WarehouseItemSerializer(serializers.ModelSerializer):
     # Ожидаемая посылка из Kargoosh: трек и дата отправки из связанной продажи.
     tracking_number = serializers.CharField(source="sale.tracking_number", read_only=True, default=None)
     shipment_date = serializers.DateField(source="sale.shipment_date", read_only=True, default=None)
+    found_by_name = serializers.CharField(source="found_by.username", read_only=True, default=None)
+    received_by_name = serializers.CharField(source="received_by.username", read_only=True, default=None)
 
     class Meta:
         model = WarehouseItem
         fields = (
             "id", "order_id", "client_code", "status", "status_display",
             "weight_kg", "price_som", "reason", "branch", "branch_name", "created_by", "created_by_name",
+            "found_by_name", "received_by_name",
             "tracking_number", "shipment_date", "created_at", "updated_at",
         )
         read_only_fields = fields

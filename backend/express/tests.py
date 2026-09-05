@@ -286,14 +286,22 @@ class TwoStageFlowTests(APITestCase):
         self.assertEqual(r.status_code, 201, r.data)
         return WarehouseOrder.objects.get()
 
+    def _receive(self, item, weight):
+        """Новый порядок: складовщик отмечает «найдено», сотрудник взвешивает и оприходует."""
+        self.client.force_authenticate(self.wh)
+        self.client.post(f"/api/warehouse-items/{item.id}/locate/")
+        self.client.force_authenticate(self.op)
+        r = self.client.post(f"/api/warehouse-items/{item.id}/receive/", {"weight_kg": weight, "account": self.acc.id}, format="json")
+        self.client.force_authenticate(self.wh)
+        return r
+
     def test_receive_creates_sale_only_on_found(self):
         order = self._make_order(["F1", "N1"])
         found_item, nf_item = order.items.order_by("id")
         self.client.force_authenticate(self.wh)
 
         # FOUND: вес 3 кг → продажа по тарифу (3 × 270 = 810), финансы видят её.
-        r = self.client.post(f"/api/warehouse-items/{found_item.id}/receive/",
-                             {"weight_kg": "3", "account": self.acc.id}, format="json")
+        r = self._receive(found_item, "3")
         self.assertEqual(r.status_code, 200, r.data)
         found_item.refresh_from_db()
         self.assertEqual(found_item.status, "FOUND")
@@ -344,8 +352,7 @@ class TwoStageFlowTests(APITestCase):
         order = self._make_order(["G1"])
         item = order.items.get()
         self.client.force_authenticate(self.wh)
-        self.client.post(f"/api/warehouse-items/{item.id}/receive/",
-                        {"weight_kg": "2", "account": self.acc.id}, format="json")
+        self._receive(item, "2")
         # Крестик разрешён только для NOT_FOUND — на найденной позиции 400.
         self.client.force_authenticate(self.op)
         r = self.client.post(f"/api/warehouse-items/{item.id}/to-evening/", format="json")
@@ -355,8 +362,7 @@ class TwoStageFlowTests(APITestCase):
         order = self._make_order(["M1", "M2"])
         found, nf = order.items.order_by("id")
         self.client.force_authenticate(self.wh)
-        self.client.post(f"/api/warehouse-items/{found.id}/receive/",
-                        {"weight_kg": "3", "account": self.acc.id}, format="json")
+        self._receive(found, "3")
         self.client.post(f"/api/warehouse-items/{nf.id}/not-found/", {"reason": "нет"}, format="json")
 
         self.client.force_authenticate(self.op)

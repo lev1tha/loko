@@ -59,14 +59,14 @@ class ReceiveAttributionTests(Base):
 
     def test_receive_requires_operator_when_ambiguous(self):
         o, it = self._unassigned()
-        self.client.force_authenticate(self.wh1)
+        self.client.force_authenticate(self.admin)
         r = self.client.post(f"/api/warehouse-items/{it.id}/receive/", {"weight_kg": "1", "account": self.acc.id}, format="json")
         self.assertEqual(r.status_code, 400)
         self.assertIn("operator", r.data)
 
     def test_receive_with_operator_assigns_and_attributes_sale(self):
         o, it = self._unassigned()
-        self.client.force_authenticate(self.wh1)
+        self.client.force_authenticate(self.admin)
         r = self.client.post(f"/api/warehouse-items/{it.id}/receive/", {"weight_kg": "2", "account": self.acc.id, "operator": self.op1.id}, format="json")
         self.assertEqual(r.status_code, 200, r.data)
         o.refresh_from_db(); it.refresh_from_db()
@@ -80,7 +80,7 @@ class ReceiveAttributionTests(Base):
 
     def test_receive_rejects_operator_from_other_branch(self):
         o, it = self._unassigned()
-        self.client.force_authenticate(self.wh1)
+        self.client.force_authenticate(self.admin)
         r = self.client.post(f"/api/warehouse-items/{it.id}/receive/", {"weight_kg": "1", "account": self.acc.id, "operator": self.op2.id}, format="json")
         self.assertEqual(r.status_code, 400)
         self.assertIn("operator", r.data)
@@ -91,10 +91,25 @@ class ReceiveAttributionTests(Base):
         o = self.intake(self.b1)
         self.assertIsNone(o.created_by)
         op = User.objects.create_user("late", password="x", role=User.Role.OPERATOR, branch=self.b1)
-        self.client.force_authenticate(self.wh1)
+        self.client.force_authenticate(self.admin)
         r = self.client.post(f"/api/warehouse-items/{o.items.first().id}/receive/", {"weight_kg": "1", "account": self.acc.id}, format="json")
         self.assertEqual(r.status_code, 200, r.data)
         o.refresh_from_db(); self.assertEqual(o.created_by, op)
+
+    def test_operator_receives_located_and_takes_unassigned_order(self):
+        o, it = self._unassigned()                       # заявка клиента, сотрудников на точке два
+        self.client.force_authenticate(self.op1)
+        r = self.client.post(f"/api/warehouse-items/{it.id}/receive/", {"weight_kg": "1", "account": self.acc.id}, format="json")
+        self.assertEqual(r.status_code, 400)             # склад ещё не отметил «найдено»
+        self.client.force_authenticate(self.wh1)
+        r = self.client.post(f"/api/warehouse-items/{it.id}/locate/")
+        self.assertEqual((r.status_code, r.data["status"], r.data["found_by_name"]), (200, "LOCATED", "wh1"))
+        self.assertEqual(self.client.post(f"/api/warehouse-items/{it.id}/receive/", {"weight_kg": "1", "account": self.acc.id}, format="json").status_code, 403)
+        self.client.force_authenticate(self.op1)
+        r = self.client.post(f"/api/warehouse-items/{it.id}/receive/", {"weight_kg": "2", "account": self.acc.id}, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        o.refresh_from_db(); it.refresh_from_db()
+        self.assertEqual((o.created_by, it.found_by, it.received_by, it.sale.created_by), (self.op1, self.wh1, self.op1, self.op1))
 
     def test_operators_picker(self):
         User.objects.create_user("op1b", password="x", role=User.Role.OPERATOR, branch=self.b1, first_name="Бек")

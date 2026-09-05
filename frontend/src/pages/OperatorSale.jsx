@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import api, { errorMessage } from '../api/client'
 import { useFetch } from '../lib/hooks'
-import { today, dateRu, som, kg } from '../lib/format'
+import { today, dateRu, kg } from '../lib/format'
 import { Alert, Field } from '../components/ui'
 import { IconPlus } from '../components/icons'
 import { useAuth } from '../auth/AuthContext'
+import { OperatorItemRow, ReceiveModal } from '../components/OperatorItems'
 
 const MAX_CODES = 5
-const FOUND = new Set(['FOUND', 'DELIVERED'])
 
 // Экран роли «Сотрудник» (двухэтапный учёт). Оператор вписывает до 5 кодов клиента
 // (без веса/суммы — их определит склад). Ниже — живой список этих кодов: когда
@@ -24,6 +24,7 @@ export default function OperatorSale() {
   const [items, setItems] = useState([])
   const [loadingItems, setLoadingItems] = useState(true)
   const [busyId, setBusyId] = useState(null)
+  const [receiveItem, setReceiveItem] = useState(null)
   const firstRef = useRef(null)
 
   // Живой список своих кодов (цена подтягивается, когда склад оприходует).
@@ -166,7 +167,7 @@ export default function OperatorSale() {
       <div className="operator-mycodes">
         <div className="operator-mycodes-head">
           <span className="field-label">Мои коды за месяц</span>
-          <span className="caption muted">🟢 найдено · 🔴 не найдено · ⚪ в поиске</span>
+          <span className="caption muted">🟢 оприходовано · 🔵 склад нашёл, взвесьте · 🔴 не найдено · ⚪ в поиске</span>
         </div>
         {loadingItems && !items.length ? (
           <p className="muted" style={{ margin: 0 }}>Загрузка…</p>
@@ -174,38 +175,15 @@ export default function OperatorSale() {
           <p className="muted" style={{ margin: 0 }}>Пока пусто — впишите коды выше.</p>
         ) : (
           <div className="operator-sales">
-            {items.map((s) => {
-              const found = FOUND.has(s.status)
-              return (
-                <div key={s.id} className={`operator-sales-row wh-row-${s.status.toLowerCase()}`}>
-                  <div className="operator-sales-main">
-                    <span className="operator-sales-code">{s.client_code}</span>
-                    <span className="operator-sales-meta">
-                      {found
-                        ? `оприходовано${s.weight_kg ? ` · ${kg(s.weight_kg)}` : ''}`
-                        : s.status === 'NOT_FOUND'
-                          ? `не найдено${s.reason ? ` · ${s.reason}` : ''}`
-                          : s.status === 'EVENING'
-                            ? 'убрано из чека · вечерний допоиск'
-                            : 'в поиске'}
-                    </span>
-                  </div>
-                  {found && <span className="operator-sales-sum">{som(s.price_som)}</span>}
-                  {s.status === 'NOT_FOUND' && (
-                    <button
-                      type="button" className="btn btn-icon wh-remove"
-                      title="Убрать из чека (в вечерний допоиск)"
-                      disabled={busyId === s.id} onClick={() => dismiss(s)}
-                    >
-                      ✕
-                    </button>
-                  )}
-                </div>
-              )
-            })}
+            {items.map((it) => (
+              <OperatorItemRow key={it.id} item={it} busyId={busyId} onReceive={setReceiveItem} onDismiss={dismiss} />
+            ))}
           </div>
         )}
       </div>
+      {receiveItem && (
+        <ReceiveModal item={receiveItem} onClose={() => setReceiveItem(null)} onDone={() => { setReceiveItem(null); loadItems() }} />
+      )}
     </div>
   )
 }
