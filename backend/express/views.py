@@ -27,7 +27,7 @@ from accounts.permissions import (
     WorkflowAccess,
 )
 from finance.models import Account, AppSettings, Branch
-from .models import Client, ClientPrice, EmployeeRating, Sale, WarehouseItem, WarehouseOrder, WarehouseStock
+from .models import Client, ClientPrice, DeliveryStatus, EmployeeRating, Sale, WarehouseItem, WarehouseOrder, WarehouseStock
 from .workflow import build_stock, build_workflow
 from .serializers import (
     ClientPriceSerializer,
@@ -446,6 +446,21 @@ class ClientPriceViewSet(viewsets.ModelViewSet):
         return super().create(request, *args, **kwargs)
 
 
+def _mark_issued(order):
+    """Заявка выдана: найденные позиции → «Выдано»; у посылок Kargo-цикла оплата
+    фиксируется в момент выдачи (в Kargoosh платят при получении)."""
+    today = timezone.localdate()
+    for it in order.items.filter(status=WarehouseItem.Status.FOUND).select_related("sale"):
+        it.status = WarehouseItem.Status.DELIVERED
+        it.save(update_fields=["status", "updated_at"])
+        sale = it.sale
+        if sale is not None and sale.delivery_status:
+            sale.paid_som = sale.price_som
+            sale.payment_date = today
+            sale.delivery_status = DeliveryStatus.DELIVERED
+            sale.save()
+
+
 @extend_schema_view(
     list=extend_schema(
         parameters=[
@@ -475,9 +490,17 @@ class WarehouseOrderViewSet(viewsets.ModelViewSet):
         )
         user = self.request.user
         params = self.request.query_params
-        # Склад и оператор — только заявки своего филиала.
+        # Склад и оператор — только заявки своего филиала. Складовщик дополнительно
+        # видит ожидаемые посылки Kargoosh точек того же региона (регион в Kargoosh
+        # один на город, а точек Loko может быть несколько).
         if getattr(user, "is_warehouse", False) or getattr(user, "is_operator", False):
-            qs = qs.filter(branch=user.branch) if user.branch_id else qs.none()
+            if not user.branch_id:
+                qs = qs.none()
+            elif getattr(user, "is_warehouse", False) and user.branch.legacy_kargo_region:
+                qs = qs.filter(Q(branch=user.branch) | Q(
+                    origin=WarehouseOrder.Origin.KARGO, branch__legacy_kargo_region=user.branch.legacy_kargo_region))
+            else:
+                qs = qs.filter(branch=user.branch)
         else:
             branch = params.get("branch")
             if branch:
@@ -485,6 +508,9 @@ class WarehouseOrderViewSet(viewsets.ModelViewSet):
         status = params.get("status")
         if status:
             qs = qs.filter(status=status)
+        origin = params.get("origin")
+        if origin:
+            qs = qs.filter(origin=origin)
         if params.get("active") in ("1", "true", "True"):
             qs = qs.exclude(status__in=[WarehouseOrder.Status.ISSUED, WarehouseOrder.Status.CANCELLED])
         # Дневная сборка: только заявки, где есть неоприходованные позиции «в поиске».
@@ -509,7 +535,8 @@ class WarehouseOrderViewSet(viewsets.ModelViewSet):
                 )
         else:
             branch = serializer.validated_data.get("branch") or user.branch or Branch.resolve_default()
-        order = serializer.save(created_by=user, branch=branch, status=WarehouseOrder.Status.NEW)
+        order = serializer.save(created_by=user, branch=branch, status=WarehouseOrder.Status.NEW,
+                                origin=WarehouseOrder.Origin.OPERATOR)
         # Двухэтапный учёт: каждая позиция стартует «в поиске», БЕЗ денег. Продажа
         # (Sale) появится только при оприходовании конкретного кода складовщиком.
         for code in serializer.validated_data.get("client_codes", []):
@@ -545,6 +572,8 @@ class WarehouseOrderViewSet(viewsets.ModelViewSet):
         if new_status == WarehouseOrder.Status.IN_PROGRESS and order.assigned_to_id is None:
             order.assigned_to = user
         order.save()
+        if new_status == WarehouseOrder.Status.ISSUED:
+            _mark_issued(order)
         return Response(WarehouseOrderSerializer(order).data)
 
 
@@ -653,7 +682,8 @@ class WarehouseItemViewSet(viewsets.ReadOnlyModelViewSet):
         now_local = timezone.localtime(timezone.now())
         month_start = now_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         period = request.query_params.get("period", "month")
-        qs = WarehouseItem.objects.filter(order__created_by=request.user)
+        # Ожидаемые посылки Kargoosh — ещё не работа сотрудника, в «Мои продажи» не попадают.
+        qs = WarehouseItem.objects.filter(order__created_by=request.user).exclude(status=WarehouseItem.Status.EXPECTED)
         if period == "prev":
             prev_start = (month_start - timezone.timedelta(days=1)).replace(day=1)
             qs = qs.filter(created_at__gte=prev_start, created_at__lt=month_start)
@@ -715,16 +745,38 @@ def public_intake(request):
     ser.is_valid(raise_exception=True)
     d = ser.validated_data
     client = Client.get_or_register(d["phone"], d.get("name", ""))
+    codes = list(d.get("client_codes") or [])
+    if not codes:
+        # Клиент с сайта: код у него уже есть, вводить повторно не нужно.
+        if not client.code:
+            raise serializers.ValidationError({"client_codes": "Впишите код клиента: у этого номера ещё нет кода."})
+        codes = [client.code]
     # Заявка сразу закрепляется за сотрудником филиала, если он один: он увидит коды
     # в «Моих продажах» ещё до оприходования. Иначе выбор — на складе при приёме.
     order = WarehouseOrder.objects.create(
         branch=d["branch"], client=client, created_by=WarehouseOrder.resolve_operator(d["branch"]),
-        status=WarehouseOrder.Status.NEW, client_codes=d["client_codes"],
+        status=WarehouseOrder.Status.NEW, client_codes=codes, origin=WarehouseOrder.Origin.CLIENT,
     )
-    for code in d["client_codes"]:
-        WarehouseItem.objects.create(order=order, client_code=code)
+    for code in codes:
+        # Если по этому коду уже ждут посылки из Kargoosh (заявка моста), забираем их
+        # в заявку клиента как «в поиске» — клиент пришёл, ищем именно их.
+        expected = WarehouseItem.objects.filter(
+            client_code__iexact=code, status=WarehouseItem.Status.EXPECTED,
+            order__origin=WarehouseOrder.Origin.KARGO,
+        ).select_related("order")
+        moved = 0
+        for it in expected:
+            src = it.order
+            it.order = order
+            it.status = WarehouseItem.Status.IN_SEARCH
+            it.save(update_fields=["order", "status", "updated_at"])
+            moved += 1
+            if not src.items.exists():
+                src.delete()
+        if not moved:
+            WarehouseItem.objects.create(order=order, client_code=code)
     return Response(
-        {"ok": True, "client_name": client.name, "codes": d["client_codes"]},
+        {"ok": True, "client_name": client.name, "codes": codes},
         status=201,
     )
 
@@ -766,11 +818,26 @@ def public_track(request):
         given = EmployeeRating.objects.filter(client=client, employee_id__in=staff.keys())
         for r in given:
             staff[r.employee_id]["my_stars"] = r.stars
+    # Посылки, известные с сайта kargoosh.kg (по коду клиента): в пути / на складе.
+    parcels = []
+    if client.code:
+        known = list(Sale.objects.filter(client_code=client.code, delivery_status__in=[DeliveryStatus.TRANSIT, DeliveryStatus.ARRIVED])
+                     .order_by("-id")[:50])
+        # сначала то, что уже на складе (можно забрать), затем в пути — свежие выше
+        known.sort(key=lambda x: (x.delivery_status != DeliveryStatus.ARRIVED, -(x.shipment_date or x.date).toordinal()))
+        for s in known:
+            parcels.append({
+                "tracking_number": s.tracking_number, "status": s.delivery_status,
+                "status_label": s.get_delivery_status_display(), "shipment_date": s.shipment_date,
+                "arrival_date": s.arrival_date, "weight_kg": str(s.weight_kg) if s.weight_kg else None,
+                "price_som": str(s.price_som) if s.delivery_status == DeliveryStatus.ARRIVED else None,
+            })
     return Response({
         "found": True,
-        "client": {"name": client.name, "phone": client.phone},
+        "client": {"name": client.name, "phone": client.phone, "code": client.code},
         "bonus": {"total_kg": str(total_kg), "free_kg": str(free_kg)},
         "items": WarehouseItemSerializer(items, many=True).data,
+        "parcels": parcels,
         "staff": list(staff.values()),
     })
 

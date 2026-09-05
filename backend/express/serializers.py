@@ -175,13 +175,16 @@ class WarehouseItemSerializer(serializers.ModelSerializer):
     created_by = serializers.IntegerField(source="order.created_by_id", read_only=True, default=None)
     created_by_name = serializers.CharField(source="order.created_by.username", read_only=True, default=None)
     price_som = serializers.SerializerMethodField()
+    # Ожидаемая посылка из Kargoosh: трек и дата отправки из связанной продажи.
+    tracking_number = serializers.CharField(source="sale.tracking_number", read_only=True, default=None)
+    shipment_date = serializers.DateField(source="sale.shipment_date", read_only=True, default=None)
 
     class Meta:
         model = WarehouseItem
         fields = (
             "id", "order_id", "client_code", "status", "status_display",
             "weight_kg", "price_som", "reason", "branch", "branch_name", "created_by", "created_by_name",
-            "created_at", "updated_at",
+            "tracking_number", "shipment_date", "created_at", "updated_at",
         )
         read_only_fields = fields
 
@@ -205,11 +208,11 @@ class WarehouseOrderSerializer(serializers.ModelSerializer):
         model = WarehouseOrder
         fields = (
             "id", "branch", "branch_name", "created_by", "created_by_name",
-            "assigned_to", "assigned_to_name", "status", "status_display",
+            "assigned_to", "assigned_to_name", "status", "status_display", "origin",
             "client_codes", "items", "comment", "created_at", "updated_at",
         )
         read_only_fields = (
-            "created_by", "assigned_to", "status", "created_at", "updated_at",
+            "created_by", "assigned_to", "status", "origin", "created_at", "updated_at",
         )
         extra_kwargs = {
             # Филиал: у оператора/складовщика подставляется на сервере (perform_create).
@@ -308,7 +311,8 @@ class PublicIntakeSerializer(serializers.Serializer):
     branch = serializers.PrimaryKeyRelatedField(queryset=Branch.objects.filter(is_active=True))
     phone = serializers.CharField(max_length=32)
     name = serializers.CharField(max_length=160, required=False, allow_blank=True, default="")
-    client_codes = serializers.ListField(child=serializers.CharField(), allow_empty=False)
+    # Коды можно не передавать: у клиента с сайта код уже есть — подставится сам.
+    client_codes = serializers.ListField(child=serializers.CharField(), allow_empty=True, required=False, default=list)
 
     def validate_phone(self, value):
         if len(Client.normalize_phone(value)) < 6:
@@ -321,9 +325,9 @@ class PublicIntakeSerializer(serializers.Serializer):
             c = str(c).strip()
             if c and c not in codes:
                 codes.append(c)
-        if not (1 <= len(codes) <= WarehouseOrder.MAX_CODES):
+        if len(codes) > WarehouseOrder.MAX_CODES:
             raise serializers.ValidationError(
-                f"Укажите от 1 до {WarehouseOrder.MAX_CODES} кодов клиента."
+                f"Не больше {WarehouseOrder.MAX_CODES} кодов клиента."
             )
         return codes
 

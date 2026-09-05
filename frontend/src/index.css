@@ -680,6 +680,9 @@ textarea.input { height: auto; padding: 10px 14px; resize: vertical; min-height:
 .wh-row-not_found { background: #F1A8A8; }
 .wh-row-evening { background: #FBE9D0; }
 .wh-row-in_search { background: #F6F8FA; }
+.wh-row-expected { background: #EEF2FF; }
+.wh-status-expected { background: #e0e7ff; color: #3730a3; }
+.wh-track { font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--muted); }
 .operator-sales-row.wh-row-found,
 .operator-sales-row.wh-row-delivered,
 .operator-sales-row.wh-row-not_found,

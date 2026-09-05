@@ -392,7 +392,7 @@ class ClientRegistrationTests(APITestCase):
         r = self._intake("+996 700 12-34-56", ["A1", "A2"], name="Азамат")  # анонимно
         self.assertEqual(r.status_code, 201, r.data)
         client = Client.objects.get()
-        self.assertEqual(client.phone, "996700123456")   # нормализован в цифры
+        self.assertEqual(client.phone, "700123456")      # единый формат: 9 цифр без «996»
         self.assertEqual(client.name, "Азамат")
         order = WarehouseOrder.objects.get()
         self.assertEqual(order.client_id, client.id)
@@ -403,9 +403,10 @@ class ClientRegistrationTests(APITestCase):
 
     def test_same_phone_different_format_is_one_client(self):
         self._intake("+996 700 111 222", ["X1"])
-        self._intake("996700111222", ["X2"])
-        self.assertEqual(Client.objects.filter(phone="996700111222").count(), 1)
-        self.assertEqual(Client.objects.get(phone="996700111222").orders.count(), 2)
+        self._intake("0700111222", ["X2"])
+        self._intake("700111222", ["X3"])
+        self.assertEqual(Client.objects.count(), 1)
+        self.assertEqual(Client.objects.get(phone="700111222").orders.count(), 3)
 
     def test_public_track_by_phone(self):
         self._intake("996700999", ["T1"], name="Бек")

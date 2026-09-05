@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import api from '../api/client'
+import api, { errorMessage } from '../api/client'
 import './ClientApp.css'
 
 const MAX = 5
@@ -91,6 +91,26 @@ export default function ClientApp() {
 
   const codes = [...new Set(inputs.map((c) => c.trim()).filter(Boolean))]
 
+  const knownCode = track?.client?.code || null
+  const parcels = track?.parcels || []
+  const inTransit = parcels.filter((p) => p.status === 'TRANSIT').length
+  const arrived = parcels.filter((p) => p.status === 'ARRIVED').length
+  const [manualCodes, setManualCodes] = useState(false)
+
+  // Клиент с сайта kargoosh.kg: код известен, вводить не нужно — одна кнопка.
+  async function submitKnown() {
+    setBusy(true); setError('')
+    try {
+      await api.post('/public/intake/', { branch: branchId, phone, name: (track?.client?.name || name || '').trim() })
+      showToast('Склад ищет ваши посылки')
+      loadTrack(phone)
+    } catch (err) {
+      setError(errorMessage(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function submitCodes() {
     if (!branchId) { setError('Не указан филиал — откройте страницу по QR филиала.'); return }
     if (!codes.length) { showToast('Впишите код'); return }
@@ -161,7 +181,7 @@ export default function ClientApp() {
   const totalKg = parseFloat(bonus.total_kg) || 0
   const freeKg = parseFloat(bonus.free_kg) || 0
   const cycle = totalKg % 20
-  const items = track?.items || []
+  const items = (track?.items || []).filter((i) => i.status !== 'EXPECTED')
   const foundTotal = items.filter((i) => FOUND.has(i.status)).reduce((s, i) => s + (parseFloat(i.price_som) || 0), 0)
   const greetName = track?.client?.name || name || 'Клиент'
 
@@ -186,6 +206,21 @@ export default function ClientApp() {
           </div>
         </section>
 
+        {knownCode && !manualCodes ? (
+          <section className="sec rise">
+            <div className="sec-h"><h2>Ваш код клиента</h2><span className="a">с сайта kargoosh.kg</span></div>
+            <div className="card" style={{ padding: 16 }}>
+              <div className="known-code">{knownCode}</div>
+              <div className="known-sub">
+                {parcels.length
+                  ? <>В пути: <b>{inTransit}</b> · На складе: <b>{arrived}</b></>
+                  : 'Посылок в пути сайт пока не сообщал'}
+              </div>
+              <button className="btn" disabled={busy} onClick={submitKnown}>{busy ? 'Отправка…' : 'Я пришёл за посылками'}</button>
+              <button type="button" className="add-more" onClick={() => setManualCodes(true)}>Сдать посылки с другим кодом</button>
+            </div>
+          </section>
+        ) : (
         <section className="sec rise">
           <div className="sec-h"><h2>Впишите коды посылок</h2><span className="a">{codes.length}/{MAX}</span></div>
           <div className="card" style={{ padding: 16 }}>
@@ -203,8 +238,28 @@ export default function ClientApp() {
               <button type="button" className="add-more" onClick={() => setInputs((xs) => [...xs, ''])}>+ Ещё код</button>
             )}
             <button className="btn" disabled={busy} onClick={submitCodes}>{busy ? 'Отправка…' : 'Отправить на склад'}</button>
+            {knownCode && <button type="button" className="add-more" onClick={() => setManualCodes(false)}>← Вернуться к своему коду</button>}
           </div>
         </section>
+        )}
+
+        {parcels.length > 0 && (
+          <section className="sec rise">
+            <div className="sec-h"><h2>Мои посылки с сайта</h2><span className="a">по данным kargoosh.kg</span></div>
+            <div className="items">
+              {parcels.map((p) => (
+                <div className="card parcel" key={p.tracking_number}>
+                  <div className="parcel-top"><span className="parcel-track">{p.tracking_number}</span><span className={`parcel-st st-${p.status.toLowerCase()}`}>{p.status_label}</span></div>
+                  <div className="parcel-sub">
+                    {p.status === 'ARRIVED'
+                      ? <>{p.weight_kg ? `${fmt(p.weight_kg)} кг · ` : ''}{p.price_som ? som(p.price_som) : ''}</>
+                      : <>отправлено {p.shipment_date ? p.shipment_date.split('-').reverse().join('.') : '—'}</>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         <section className="sec rise">
           <div className="sec-h"><h2>Мои грузы</h2><span className="a">обновляется само</span></div>

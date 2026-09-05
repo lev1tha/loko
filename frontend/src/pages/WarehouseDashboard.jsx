@@ -43,25 +43,33 @@ export default function WarehouseDashboard() {
   )
   const dayReq = useFetch('/warehouse-orders/', dayParams)
   const eveningReq = useFetch('/warehouse-items/', { status: 'EVENING' })
+  // Ожидаемые посылки: заказы Kargoosh «в пути», сгруппированы по клиенту (заявки моста).
+  const expectedParams = useMemo(
+    () => ({ origin: 'KARGO', active: 1, ...(search.trim() ? { search: search.trim() } : {}) }),
+    [search],
+  )
+  const expectedReq = useFetch('/warehouse-orders/', expectedParams)
   const accounts = asList(useFetch('/warehouse-items/accounts/').data)
   // Остаток веса на складе своего филиала (ведёт директор) — только чтение.
   const stock = useFetch(isWarehouse && userBranchName ? '/warehouse-stock/summary/' : null, {})
 
   const orders = asList(dayReq.data)
   const evening = asList(eveningReq.data)
+  const expected = asList(expectedReq.data)
+  const expectedTotal = expectedReq.data?.count ?? expected.length
 
   // Авто-обновление обеих лент (near-real-time без WebSocket).
   useEffect(() => {
-    const t = setInterval(() => { dayReq.reload(); eveningReq.reload() }, POLL_MS)
+    const t = setInterval(() => { dayReq.reload(); eveningReq.reload(); expectedReq.reload() }, POLL_MS)
     return () => clearInterval(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dayReq.reload, eveningReq.reload])
+  }, [dayReq.reload, eveningReq.reload, expectedReq.reload])
 
   function openReceive(item) {
     setError('')
     setReceiveItem(item)
     setWeight('')
-    setTracking('')
+    setTracking(item.tracking_number || '')
     setOperators([])
     setOperatorId('')
     if (!item.created_by) {
@@ -91,7 +99,7 @@ export default function WarehouseDashboard() {
         ...(operatorId ? { operator: operatorId } : {}),
       })
       setReceiveItem(null)
-      dayReq.reload(); eveningReq.reload()
+      dayReq.reload(); eveningReq.reload(); expectedReq.reload()
     } catch (err) {
       setError(errorMessage(err))
     } finally {
@@ -106,7 +114,7 @@ export default function WarehouseDashboard() {
     setError('')
     try {
       await api.post(`/warehouse-items/${item.id}/not-found/`, { reason: reason.trim() })
-      dayReq.reload(); eveningReq.reload()
+      dayReq.reload(); eveningReq.reload(); expectedReq.reload()
     } catch (err) {
       setError(errorMessage(err))
     } finally {
@@ -160,6 +168,10 @@ export default function WarehouseDashboard() {
         <button className={`wh-tab ${tab === 'day' ? 'active' : ''}`} onClick={() => setTab('day')}>
           Дневная сборка
         </button>
+        <button className={`wh-tab ${tab === 'expected' ? 'active' : ''}`} onClick={() => setTab('expected')}>
+          Ожидаются
+          {expectedTotal > 0 && <span className="wh-tab-badge">{expectedTotal}</span>}
+        </button>
         <button className={`wh-tab ${tab === 'evening' ? 'active' : ''}`} onClick={() => setTab('evening')}>
           Вечерний допоиск
           {evening.length > 0 && <span className="wh-tab-badge">{evening.length}</span>}
@@ -177,6 +189,26 @@ export default function WarehouseDashboard() {
               <OrderCard key={o.id} order={o} showBranch={!isWarehouse} {...itemProps} />
             ))}
           </div>
+        )
+      ) : tab === 'expected' ? (
+        expectedReq.loading && !expected.length ? (
+          <Spinner full />
+        ) : !expected.length ? (
+          <div className="wh-empty-box">
+            {search.trim() ? 'По этому коду ожидаемых посылок нет.' : 'Ожидаемых посылок нет: сайт kargoosh.kg не сообщал о новых отправках за последние 30 дней.'}
+          </div>
+        ) : (
+          <>
+            <p className="muted" style={{ margin: '0 0 8px' }}>
+              Посылки, о которых сообщил kargoosh.kg («в пути»). Когда приедут, оприходуйте здесь, запись не задвоится.
+              {expectedTotal > expected.length && ` Показаны ${expected.length} клиентов из ${expectedTotal}, уточните поиск по коду.`}
+            </p>
+            <div className="wh-orders">
+              {expected.map((o) => (
+                <OrderCard key={o.id} order={o} showBranch={!isWarehouse} {...itemProps} />
+              ))}
+            </div>
+          </>
         )
       ) : eveningReq.loading && !evening.length ? (
         <Spinner full />
@@ -291,6 +323,10 @@ function ItemRow({ item, showBranch, busyId, onReceive, onNotFound }) {
         {item.status === 'NOT_FOUND' && item.reason && (
           <span className="wh-item-reason">💬 {item.reason}</span>
         )}
+        {item.tracking_number && <span className="wh-track">{item.tracking_number}</span>}
+        {item.status === 'EXPECTED' && item.shipment_date && (
+          <span className="muted">отправлено {item.shipment_date.split('-').reverse().join('.')}</span>
+        )}
       </div>
 
       {found ? (
@@ -307,13 +343,15 @@ function ItemRow({ item, showBranch, busyId, onReceive, onNotFound }) {
           >
             Оприходовать
           </button>
-          <button
-            className="btn btn-ghost btn-sm"
-            disabled={busyId === item.id}
-            onClick={() => onNotFound(item)}
-          >
-            Не найдено
-          </button>
+          {item.status !== 'EXPECTED' && (
+            <button
+              className="btn btn-ghost btn-sm"
+              disabled={busyId === item.id}
+              onClick={() => onNotFound(item)}
+            >
+              Не найдено
+            </button>
+          )}
         </div>
       )}
     </div>

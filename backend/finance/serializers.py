@@ -39,7 +39,7 @@ class BranchSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Branch
-        fields = ("id", "name", "address", "is_active", "is_default", "track_url", "created_at")
+        fields = ("id", "name", "address", "is_active", "is_default", "legacy_kargo_region", "track_url", "created_at")
         read_only_fields = ("created_at",)
 
     @extend_schema_field(OpenApiTypes.URI)

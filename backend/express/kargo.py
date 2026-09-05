@@ -84,27 +84,22 @@ def phone_candidates(raw) -> list[str]:
     """
     from .models import Client
 
-    digits = Client.normalize_phone(raw)
-    if not digits:
+    raw_digits = "".join(ch for ch in str(raw or "") if ch.isdigit())
+    if not raw_digits:
         return []
-    out = [digits]
-    if digits.startswith("996") and len(digits) == 12:
-        out.append(digits[3:])
-    elif digits.startswith("0") and len(digits) == 10:
-        out.append(digits[1:])
-    if len(digits) == 9:
-        out.append("996" + digits)
-    return list(dict.fromkeys(out))
+    canon = Client.normalize_phone(raw)
+    # канонический + сырые варианты (старые записи до унификации формата)
+    out = [canon, raw_digits]
+    if len(canon) == 9:
+        out += ["996" + canon, "0" + canon]
+    return list(dict.fromkeys(x for x in out if x))
 
 
 def canonical_phone(raw) -> str:
-    """Телефон для хранения — в формате Kargo (9 цифр без «996»/«0»), если это
-    киргизский номер; иначе просто цифры."""
-    cands = phone_candidates(raw)
-    if not cands:
-        return ""
-    nine = [c for c in cands if len(c) == 9]
-    return nine[0] if nine else cands[0]
+    """Телефон для хранения — единый формат Loko/Kargo (см. Client.normalize_phone)."""
+    from .models import Client
+
+    return Client.normalize_phone(raw)
 
 
 def find_client_by_phone(raw):

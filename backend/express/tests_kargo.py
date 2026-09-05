@@ -283,9 +283,9 @@ class OrderFlowTests(KargoBase):
 
 class HelperTests(KargoBase):
     def test_phone_candidates(self):
-        self.assertEqual(kargo.phone_candidates("+996 700 123 456"), ["996700123456", "700123456"])
-        self.assertEqual(kargo.phone_candidates("0700123456"), ["0700123456", "700123456"])
-        self.assertEqual(kargo.phone_candidates("700123456"), ["700123456", "996700123456"])
+        self.assertEqual(kargo.phone_candidates("+996 700 123 456"), ["700123456", "996700123456", "0700123456"])
+        self.assertEqual(kargo.phone_candidates("0700123456"), ["700123456", "0700123456", "996700123456"])
+        self.assertEqual(kargo.phone_candidates("700123456"), ["700123456", "996700123456", "0700123456"])
         self.assertEqual(kargo.canonical_phone("+996700123456"), "700123456")
         self.assertEqual(kargo.phone_candidates(""), [])
 

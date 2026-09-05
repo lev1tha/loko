@@ -45,9 +45,16 @@ from django.db import transaction
 from django.db.models import Count, Sum
 from django.utils import timezone
 
+from django.db.models import Q
+
 from express.kargo import is_legacy_hash
-from express.models import Client, DeliveryStatus, KargoSync, Sale
+from express.kargo_expected import sync_expected
+from express.models import Client, DeliveryStatus, KargoSync, Sale, WarehouseItem
 from finance.models import Account, Branch
+
+# Строки, которыми владеет Loko: отправленные мостом либо оприходованные складом Loko
+# ожидаемые посылки. Импорт их не перезаписывает и не удаляет.
+_LOKO_OWNED_Q = Q(kargo_pushed_at__isnull=False) | Q(warehouse_item__status__in=list(WarehouseItem.FINANCIAL))
 
 ZERO = Decimal("0.00")
 _FALLBACK_DATE = _date(2000, 1, 1)
@@ -187,13 +194,15 @@ class Command(BaseCommand):
         self._upsert_clients(regions)
         self._import_orders_full(admin_branch, card_acc)
         self._settle_accounts(card_acc.values())
+        self.stats["expected"] = sync_expected(self.stdout)
 
     def _wipe_legacy(self):
         """Удаляем только перенесённые продажи и клиентов. Счета и филиалы Kargo
         оставляем: на них уже могут ссылаться продажи, созданные в Loko через
         /api/kargo/ (FK PROTECT), а импорт всё равно переиспользует их по
         legacy-ключам и заново сводит начальные остатки."""
-        n_s = Sale.objects.filter(legacy_kargo_id__isnull=False, kargo_pushed_at__isnull=True).delete()[0]
+        n_s = Sale.objects.filter(legacy_kargo_id__isnull=False, kargo_pushed_at__isnull=True) \
+            .exclude(warehouse_item__status__in=list(WarehouseItem.FINANCIAL)).delete()[0]
         n_c = Client.objects.filter(legacy_kargo_id__isnull=False).delete()[0]
         self.stdout.write(f"  очищены прежние legacy-строки: sale={n_s} client={n_c}")
 
@@ -213,6 +222,7 @@ class Command(BaseCommand):
         # у прежних он заморожен на момент полного импорта, а новые оплаты — уже
         # настоящие притоки.
         self._settle_accounts(self.new_accounts)
+        self.stats["expected"] = sync_expected(self.stdout)
 
     # ---------------------------------------------------------------- layers
     def _import_branches(self):
@@ -226,9 +236,9 @@ class Command(BaseCommand):
             r = row["r"].strip()
             if not r:
                 continue
-            b, _ = Branch.objects.get_or_create(
-                legacy_kargo_region=r, defaults={"name": f"Kargo · {r}", "is_active": True},
-            )
+            b = Branch.objects.filter(legacy_kargo_region=r).order_by("-is_active", "id").first()
+            if b is None:
+                b = Branch.objects.create(legacy_kargo_region=r, name=f"Kargo · {r}", is_active=True)
             rp = prices.get("price_" + r.replace(" ", ""))
             price = _d(rp) if rp not in (None, "") and rp != base_price else None
             if b.price_per_kg_som != price:
@@ -393,7 +403,7 @@ class Command(BaseCommand):
         sql = "SELECT * FROM orders" + (f" LIMIT {self.limit}" if self.limit else "")
         buf, total, seen_track = [], 0, set()
         const = self._const_fields()
-        loko_owned = set(Sale.objects.filter(kargo_pushed_at__isnull=False).values_list("legacy_kargo_id", flat=True))
+        loko_owned = set(Sale.objects.filter(_LOKO_OWNED_Q).values_list("legacy_kargo_id", flat=True))
         for o in self._q(sql):
             if o["pk_i_id"] in loko_owned:
                 total += 1  # строка есть в обеих системах, хозяин — Loko
@@ -437,7 +447,7 @@ class Command(BaseCommand):
             tracks = [t for t in ((o["s_tracking_number"] or "").strip() for o in chunk) if t]
             by_legacy = {s.legacy_kargo_id: s for s in Sale.objects.filter(legacy_kargo_id__in=ids)}
             # Строки, рождённые в Loko и отправленные мостом, — Loko главный, пропускаем.
-            loko_owned = {s.legacy_kargo_id for s in by_legacy.values() if s.kargo_pushed_at is not None}
+            loko_owned = set(Sale.objects.filter(_LOKO_OWNED_Q, legacy_kargo_id__in=ids).values_list("legacy_kargo_id", flat=True))
             # Кто уже держит трек в Loko: legacy id другого заказа → в источнике дубль
             # (номера отличались пробелами; в Kargo unique, после TRIM — нет) — второму
             # трек не даём, как и при полном импорте. Держатель без legacy id — заказ,

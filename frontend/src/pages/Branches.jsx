@@ -217,6 +217,7 @@ function BranchForm({ editing, onClose, onSaved }) {
   const [address, setAddress] = useState(editing?.address || '')
   const [isActive, setIsActive] = useState(editing ? editing.is_active : true)
   const [isDefault, setIsDefault] = useState(editing ? editing.is_default : false)
+  const [region, setRegion] = useState(editing?.legacy_kargo_region || '')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -225,7 +226,7 @@ function BranchForm({ editing, onClose, onSaved }) {
     setError('')
     setSaving(true)
     try {
-      const body = { name: name.trim(), address: address.trim(), is_active: isActive, is_default: isDefault }
+      const body = { name: name.trim(), address: address.trim(), is_active: isActive, is_default: isDefault, legacy_kargo_region: region.trim() }
       if (isEdit) await api.patch(`/branches/${editing.id}/`, body)
       else await api.post('/branches/', body)
       onSaved()
@@ -260,6 +261,9 @@ function BranchForm({ editing, onClose, onSaved }) {
             required
             autoFocus
           />
+        </Field>
+        <Field label="Регион в Kargoosh" hint="Как в базе сайта: Ош, Ош-район, Кара-суу, Бишкек. Посылки «в пути» этого региона попадут на доску склада этой точки">
+          <input className="input" value={region} onChange={(e) => setRegion(e.target.value)} placeholder="Ош" />
         </Field>
         <Field label="Адрес" hint="Необязательно">
           <input

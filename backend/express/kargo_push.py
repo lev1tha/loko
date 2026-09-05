@@ -50,7 +50,12 @@ def connect():
 
 
 def is_loko_origin(sale) -> bool:
-    return sale.legacy_kargo_id is None or sale.kargo_pushed_at is not None
+    """Продажей владеет Loko: создана здесь, уже отправлялась мостом, либо это
+    ожидаемая посылка Kargoosh, которую оприходовал склад Loko."""
+    if sale.legacy_kargo_id is None or sale.kargo_pushed_at is not None:
+        return True
+    item = getattr(sale, "warehouse_item", None)
+    return item is not None and item.status in WarehouseItem.FINANCIAL
 
 
 def _dt(d):
@@ -175,7 +180,8 @@ def _mark(sale_ids):
     if not sale_ids:
         return
     Sale.objects.filter(pk__in=sale_ids).filter(
-        Q(legacy_kargo_id__isnull=True) | Q(kargo_pushed_at__isnull=False),
+        Q(legacy_kargo_id__isnull=True) | Q(kargo_pushed_at__isnull=False)
+        | Q(warehouse_item__status__in=list(WarehouseItem.FINANCIAL)),
         account__module="EXPRESS",
     ).exclude(client_code="").update(kargo_sync_pending=True)
     if enabled() and getattr(settings, "KARGO_PUSH_IMMEDIATE", True):

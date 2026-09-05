@@ -318,6 +318,17 @@ class WarehouseOrder(models.Model):
     status = models.CharField(
         max_length=12, choices=Status.choices, default=Status.NEW, verbose_name="Статус",
     )
+
+    class Origin(models.TextChoices):
+        OPERATOR = "OPERATOR", "Сотрудник"
+        CLIENT = "CLIENT", "Клиент (QR)"
+        KARGO = "KARGO", "Kargoosh (ожидаемые посылки)"
+
+    # Откуда заявка: сотрудник создал, клиент сдал коды по QR, либо мост завёл её
+    # из заказов сайта «в пути» (ожидаемые посылки складу).
+    origin = models.CharField(
+        max_length=8, choices=Origin.choices, default=Origin.OPERATOR, verbose_name="Источник",
+    )
     # Коды клиентов (1–5). JSONField — работает и на SQLite (dev), и на PostgreSQL.
     client_codes = models.JSONField(default=list, verbose_name="Коды клиентов (1–5)")
     sales = models.ManyToManyField(
@@ -377,11 +388,15 @@ class WarehouseItem(models.Model):
     """
 
     class Status(models.TextChoices):
+        EXPECTED = "EXPECTED", "Ожидается"      # посылка известна из Kargoosh («в пути»), ещё не на складе
         IN_SEARCH = "IN_SEARCH", "В поиске"
         FOUND = "FOUND", "Найдено"
         NOT_FOUND = "NOT_FOUND", "Не найдено"
         EVENING = "EVENING", "Вечерний допоиск"
         DELIVERED = "DELIVERED", "Выдано"
+
+    # Статусы «до оприходования» — позиция без денег.
+    OPEN = {"EXPECTED", "IN_SEARCH", "NOT_FOUND", "EVENING"}
 
     # Статусы, для которых существует официальная продажа (учитываются финансами).
     FINANCIAL = {Status.FOUND, Status.DELIVERED}
@@ -430,16 +445,38 @@ class WarehouseItem(models.Model):
         # Атомарно: мост Loko → Kargoosh срабатывает по on_commit и должен видеть
         # продажу уже привязанной к позиции (иначе она уйдёт как «прямая», статус 3).
         with transaction.atomic():
-            sale = Sale.objects.create(
-                client_code=self.client_code,
-                amount_mode=Sale.AmountMode.WEIGHT,
-                weight_kg=weight,
-                account=account,
-                branch=self.order.branch,
-                date=timezone.localdate(),
-                created_by=self.order.created_by,
-                tracking_number=track,
-            )
+            if self.sale_id:
+                # Ожидаемая посылка из Kargoosh: продажа уже есть (заказ «в пути»),
+                # ОБНОВЛЯЕМ её, а не создаём вторую — иначе выручка задваивается.
+                sale = self.sale
+                sale.amount_mode = Sale.AmountMode.WEIGHT
+                sale.weight_kg = weight
+                sale.account = account
+                sale.branch = self.order.branch
+                sale.date = timezone.localdate()
+                sale.arrival_date = timezone.localdate()
+                sale.created_by = self.order.created_by
+                if track:
+                    sale.tracking_number = track
+                sale.price_per_kg_usd = None      # тариф пересчитать по текущим Настройкам
+                sale.usd_rate_som = None
+                sale.cost_per_kg_som = None
+                sale.cost_is_manual = False
+                sale.paid_som = Decimal("0")      # в цикле Kargo оплата при выдаче
+                sale.payment_date = None
+                sale.delivery_status = DeliveryStatus.ARRIVED
+                sale.save()
+            else:
+                sale = Sale.objects.create(
+                    client_code=self.client_code,
+                    amount_mode=Sale.AmountMode.WEIGHT,
+                    weight_kg=weight,
+                    account=account,
+                    branch=self.order.branch,
+                    date=timezone.localdate(),
+                    created_by=self.order.created_by,
+                    tracking_number=track,
+                )
             self.sale = sale
             self.weight_kg = weight
             self.reason = ""
@@ -514,8 +551,15 @@ class Client(models.Model):
 
     @staticmethod
     def normalize_phone(raw) -> str:
-        """Канонический телефон — только цифры."""
-        return "".join(ch for ch in str(raw or "") if ch.isdigit())
+        """Канонический телефон: только цифры, для киргизских номеров — 9 цифр без
+        «996» и без ведущего «0» (как хранит kargoosh.kg). «+996 700 12 34 56»,
+        «0700123456» и «700123456» — один и тот же клиент."""
+        digits = "".join(ch for ch in str(raw or "") if ch.isdigit())
+        if len(digits) == 12 and digits.startswith("996"):
+            return digits[3:]
+        if len(digits) == 10 and digits.startswith("0"):
+            return digits[1:]
+        return digits
 
     def check_password(self, raw_password) -> bool:
         """Проверка пароля клиента (legacy-MD5 из Kargo или хеш Django)."""

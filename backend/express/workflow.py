@@ -66,8 +66,10 @@ def build_workflow(date_from=None, date_to=None, branch_id=None):
         return users[uid]
 
     # Операторы: созданные заявки/позиции за период.
+    # Ожидаемые посылки Kargoosh (EXPECTED) — не работа сотрудников, в счётчики не входят.
     created = (
         WarehouseItem.objects.filter(scope, created_at__gte=start, created_at__lt=end, order__created_by__isnull=False)
+        .exclude(status=WarehouseItem.Status.EXPECTED)
         .values("order__created_by").annotate(items=Count("id"), orders=Count("order", distinct=True))
     )
     for r in created:
@@ -119,8 +121,11 @@ def build_workflow(date_from=None, date_to=None, branch_id=None):
     totals = {
         "from": d_from.isoformat(), "to": d_to.isoformat(),
         "orders_created": WarehouseOrder.objects.filter(
-            Q(branch_id=branch_id) if branch_id else Q(), created_at__gte=start, created_at__lt=end).count(),
-        "items_created": WarehouseItem.objects.filter(scope, created_at__gte=start, created_at__lt=end).count(),
+            Q(branch_id=branch_id) if branch_id else Q(), created_at__gte=start, created_at__lt=end)
+            .exclude(origin=WarehouseOrder.Origin.KARGO).count(),
+        "items_created": WarehouseItem.objects.filter(scope, created_at__gte=start, created_at__lt=end)
+            .exclude(status=WarehouseItem.Status.EXPECTED).count(),
+        "expected_now": WarehouseItem.objects.filter(scope, status=WarehouseItem.Status.EXPECTED).count(),
         "items_found": fin["n"] or 0,
         "kg_found": str((fin["kg"] or KG0).quantize(KG0)),
         "som_found": str((fin["som"] or ZERO).quantize(ZERO)),
