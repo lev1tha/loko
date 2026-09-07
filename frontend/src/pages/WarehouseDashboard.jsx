@@ -115,10 +115,21 @@ export default function WarehouseDashboard() {
 
   // Складовщик нашёл посылку: без денег, вес и продажу вносит сотрудник.
   async function locate(item) {
+    let quantity = item.quantity || 1
+    if (quantity > 1) {
+      // Под кодом несколько мест: складовщик указывает, сколько реально нашёл.
+      const answer = await prompt({
+        title: `Найдено · ${item.client_code}`, label: `Сколько мест нашли из ${quantity}`, initial: String(quantity),
+        okLabel: 'Отметить найденным', hint: 'Если нашли меньше, остаток станет отдельной позицией «не найдено»',
+      })
+      if (answer === null) return
+      quantity = parseInt(answer, 10)
+      if (!(quantity >= 1 && quantity <= item.quantity)) { setError(`Введите число от 1 до ${item.quantity}.`); return }
+    }
     setBusyId(item.id)
     setError('')
     try {
-      await api.post(`/warehouse-items/${item.id}/locate/`)
+      await api.post(`/warehouse-items/${item.id}/locate/`, { quantity })
       dayReq.reload(); eveningReq.reload(); expectedReq.reload()
     } catch (err) {
       setError(errorMessage(err))
@@ -349,13 +360,18 @@ function ItemRow({ item, showBranch, busyId, onReceive, onNotFound, onLocate, ca
   return (
     <div className={`wh-item wh-row-${item.status.toLowerCase()}`}>
       <div className="wh-item-main">
-        <span className="wh-code">{item.client_code}</span>
+        <span className="wh-code">{item.client_code}{item.quantity > 1 ? ` × ${item.quantity}` : ''}</span>
         <span className={`wh-status wh-status-${item.status.toLowerCase()}`}>{item.status_display}</span>
         {showBranch && item.branch_name && (
           <span className="wh-item-branch">{shortBranch(item.branch_name)}</span>
         )}
         {item.status === 'NOT_FOUND' && item.reason && (
           <span className="wh-item-reason">💬 {item.reason}</span>
+        )}
+        {located && (
+          <span className="muted" style={{ fontSize: 13, flexBasis: '100%' }}>
+            найдено {item.quantity} {item.quantity === 1 ? 'место' : 'мест'} · ждёт оприходования сотрудником{item.found_by_name ? ` · нашёл ${item.found_by_name}` : ''}
+          </span>
         )}
         {item.tracking_number && <span className="wh-track">{item.tracking_number}</span>}
         {item.status === 'EXPECTED' && item.shipment_date && (
@@ -370,7 +386,6 @@ function ItemRow({ item, showBranch, busyId, onReceive, onNotFound, onLocate, ca
         </div>
       ) : (
         <div className="wh-item-actions">
-          {located && <span className="muted" style={{ fontSize: 13 }}>ждёт оприходования сотрудником{item.found_by_name ? ` · нашёл ${item.found_by_name}` : ''}</span>}
           {!located && (
             <button className="btn btn-primary btn-sm" disabled={busyId === item.id} onClick={() => onLocate(item)}>
               Найдено
@@ -381,7 +396,7 @@ function ItemRow({ item, showBranch, busyId, onReceive, onNotFound, onLocate, ca
               Оприходовать
             </button>
           )}
-          {item.status !== 'EXPECTED' && (
+          {item.status !== 'EXPECTED' && !located && (
             <button
               className="btn btn-ghost btn-sm"
               disabled={busyId === item.id}

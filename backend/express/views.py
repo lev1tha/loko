@@ -37,6 +37,7 @@ from .serializers import (
     PublicRateSerializer,
     SaleSerializer,
     WarehouseItemSerializer,
+    WarehouseLocateSerializer,
     WarehouseNotFoundSerializer,
     WarehouseOrderSerializer,
     WarehouseReceiveSerializer,
@@ -540,8 +541,9 @@ class WarehouseOrderViewSet(viewsets.ModelViewSet):
                                 origin=WarehouseOrder.Origin.OPERATOR)
         # Двухэтапный учёт: каждая позиция стартует «в поиске», БЕЗ денег. Продажа
         # (Sale) появится только при оприходовании конкретного кода складовщиком.
+        qty = getattr(serializer, "quantities", {})
         for code in serializer.validated_data.get("client_codes", []):
-            WarehouseItem.objects.create(order=order, client_code=code)
+            WarehouseItem.objects.create(order=order, client_code=code, quantity=qty.get(code, 1))
 
     @extend_schema(request=WarehouseStatusSerializer, responses=WarehouseOrderSerializer)
     @action(detail=True, methods=["patch", "post"], url_path="status")
@@ -653,11 +655,11 @@ class WarehouseItemViewSet(viewsets.ReadOnlyModelViewSet):
         item.receive(
             ser.validated_data.get("weight_kg"), ser.validated_data["account"], by_user=request.user,
             tracking_number=ser.validated_data.get("tracking_number") or None,
-            price_som=ser.validated_data.get("price_som"),
+            price_som=ser.validated_data.get("price_som"), quantity=ser.validated_data.get("quantity"),
         )
         return Response(WarehouseItemSerializer(item).data)
 
-    @extend_schema(request=None, responses=WarehouseItemSerializer)
+    @extend_schema(request=WarehouseLocateSerializer, responses=WarehouseItemSerializer)
     @action(detail=True, methods=["post"])
     def locate(self, request, pk=None):
         """Складовщик нашёл посылку → «Найдено, к оприходованию». Денег ещё нет:
@@ -665,7 +667,12 @@ class WarehouseItemViewSet(viewsets.ReadOnlyModelViewSet):
         item = self.get_object()
         if item.status in WarehouseItem.FINANCIAL:
             raise serializers.ValidationError({"status": "Позиция уже оприходована."})
-        item.locate(by_user=request.user)
+        ser = WarehouseLocateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        try:
+            item.locate(by_user=request.user, found_quantity=ser.validated_data.get("quantity"))
+        except ValueError as exc:
+            raise serializers.ValidationError({"quantity": str(exc)})
         return Response(WarehouseItemSerializer(item).data)
 
     @extend_schema(request=WarehouseNotFoundSerializer, responses=WarehouseItemSerializer)
@@ -801,7 +808,7 @@ def public_intake(request):
             if not src.items.exists():
                 src.delete()
         if not moved:
-            WarehouseItem.objects.create(order=order, client_code=code)
+            WarehouseItem.objects.create(order=order, client_code=code, quantity=getattr(ser, "quantities", {}).get(code, 1))
     return Response(
         {"ok": True, "client_name": client.name, "codes": codes},
         status=201,

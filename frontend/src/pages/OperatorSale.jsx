@@ -17,6 +17,7 @@ export default function OperatorSale() {
   // Остаток веса на складе своего филиала — чтобы сотрудник знал, есть ли что выдавать.
   const stock = useFetch(userBranchName ? '/warehouse-stock/summary/' : null, {})
   const [codes, setCodes] = useState([''])
+  const [qtys, setQtys] = useState([1])          // кол-во мест под каждым кодом
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
   const [saving, setSaving] = useState(false)
@@ -43,10 +44,15 @@ export default function OperatorSale() {
   function setCodeAt(i, val) {
     setCodes((cs) => cs.map((c, idx) => (idx === i ? val : c)))
   }
+  function setQtyAt(i, val) {
+    setQtys((qs) => qs.map((q, idx) => (idx === i ? val : q)))
+  }
   function addRow() {
     setCodes((cs) => (cs.length < MAX_CODES ? [...cs, ''] : cs))
+    setQtys((qs) => (qs.length < MAX_CODES ? [...qs, 1] : qs))
   }
   function removeRow(i) {
+    setQtys((qs) => qs.filter((_, idx) => idx !== i))
     setCodes((cs) => (cs.length > 1 ? cs.filter((_, idx) => idx !== i) : cs))
   }
 
@@ -66,7 +72,8 @@ export default function OperatorSale() {
     }
     setSaving(true)
     try {
-      await api.post('/warehouse-orders/', { client_codes: uniqueCodes })
+      const payload = codes.map((c, i) => ({ code: c.trim(), quantity: Math.max(1, parseInt(qtys[i], 10) || 1) })).filter((x) => x.code)
+      await api.post('/warehouse-orders/', { client_codes: payload })
       setSuccess(`Отправлено на склад: ${uniqueCodes.length}. Цена появится ниже, когда склад найдёт и взвесит.`)
       setCodes([''])
       firstRef.current?.focus()
@@ -97,8 +104,8 @@ export default function OperatorSale() {
       <div className="operator-card-head">
         <h2 className="card-title">Новая продажа</h2>
         <p className="muted">
-          Впишите коды клиента (до {MAX_CODES}) — склад найдёт, взвесит и оприходует.
-          Цена появится ниже. Дата: сегодня, {dateRu(today())}.
+          Впишите коды клиента (до {MAX_CODES}) и сколько мест под каждым. Склад найдёт и отметит,
+          вы впишете сумму и оприходуете. Дата: сегодня, {dateRu(today())}.
         </p>
         {stock.data && (
           <p className="muted" style={{ margin: '6px 0 0', fontSize: 14 }}>
@@ -115,7 +122,7 @@ export default function OperatorSale() {
 
       <form onSubmit={submit} className="col">
         <div className="field">
-          <span className="field-label">Код клиента</span>
+          <span className="field-label">Код клиента и кол-во мест</span>
           <div className="operator-code-rows">
             {codes.map((c, i) => (
               <div className="operator-code-row" key={i}>
@@ -127,6 +134,11 @@ export default function OperatorSale() {
                   placeholder="29520"
                   autoFocus={i === 0}
                 />
+                <input
+                  className="input operator-qty-input" type="number" min="1" max="999" inputMode="numeric"
+                  value={qtys[i] ?? 1} onChange={(e) => setQtyAt(i, e.target.value)} title="Кол-во мест" aria-label="Кол-во мест"
+                />
+                <span className="muted" style={{ fontSize: 13 }}>мест</span>
                 {codes.length > 1 && (
                   <button
                     type="button" className="operator-code-remove"

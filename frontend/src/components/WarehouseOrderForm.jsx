@@ -9,6 +9,7 @@ const MAX = 5
 // (+ выбор филиала для менеджера/админа). Используется на доске склада и у оператора.
 export default function WarehouseOrderForm({ onCreated, branches = [], showBranch = false }) {
   const [codes, setCodes] = useState([''])
+  const [qtys, setQtys] = useState([1])
   const [comment, setComment] = useState('')
   const [branchId, setBranchId] = useState(branches.find((b) => b.is_default)?.id || '')
   const [error, setError] = useState('')
@@ -16,8 +17,14 @@ export default function WarehouseOrderForm({ onCreated, branches = [], showBranc
   const [saving, setSaving] = useState(false)
 
   const setCode = (i, v) => setCodes((cs) => cs.map((c, j) => (j === i ? v : c)))
-  const addCode = () => setCodes((cs) => (cs.length < MAX ? [...cs, ''] : cs))
-  const removeCode = (i) => setCodes((cs) => (cs.length > 1 ? cs.filter((_, j) => j !== i) : cs))
+  const addCode = () => {
+    setCodes((cs) => (cs.length < MAX ? [...cs, ''] : cs))
+    setQtys((qs) => (qs.length < MAX ? [...qs, 1] : qs))
+  }
+  const removeCode = (i) => {
+    setCodes((cs) => (cs.length > 1 ? cs.filter((_, j) => j !== i) : cs))
+    setQtys((qs) => (qs.length > 1 ? qs.filter((_, j) => j !== i) : qs))
+  }
 
   async function submit(e) {
     e.preventDefault()
@@ -30,7 +37,10 @@ export default function WarehouseOrderForm({ onCreated, branches = [], showBranc
     }
     setSaving(true)
     try {
-      const body = { client_codes: clean, comment: comment.trim() }
+      const body = {
+        client_codes: codes.map((c, i) => ({ code: c.trim(), quantity: Math.max(1, parseInt(qtys[i], 10) || 1) })).filter((x) => x.code),
+        comment: comment.trim(),
+      }
       if (showBranch && branchId) body.branch = branchId
       await api.post('/warehouse-orders/', body)
       setCodes([''])
@@ -60,6 +70,9 @@ export default function WarehouseOrderForm({ onCreated, branches = [], showBranc
               placeholder={`Код клиента ${i + 1}`}
               autoFocus={i === 0}
             />
+            <input className="input operator-qty-input" type="number" min="1" max="999" value={qtys[i] ?? 1}
+              onChange={(e) => setQtys((qs) => qs.map((q, idx) => (idx === i ? e.target.value : q)))} title="Кол-во мест" aria-label="Кол-во мест" />
+            <span className="muted" style={{ fontSize: 13, whiteSpace: 'nowrap' }}>мест</span>
             {codes.length > 1 && (
               <button type="button" className="btn btn-icon btn-ghost btn-sm" title="Убрать код" onClick={() => removeCode(i)}>
                 ×

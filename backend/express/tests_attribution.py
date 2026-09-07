@@ -206,3 +206,54 @@ class ReceiveByAmountTests(Base):
         r = self.client.post(f"/api/warehouse-items/{it.id}/receive/", {"account": self.acc.id}, format="json")
         self.assertEqual(r.status_code, 400)
         self.assertIn("price_som", r.data)
+
+
+class QuantityTests(Base):
+    def test_operator_order_with_quantities(self):
+        self.client.force_authenticate(self.op1)
+        r = self.client.post("/api/warehouse-orders/", {"client_codes": [{"code": "Q1", "quantity": 3}, "Q2", {"code": "Q1", "quantity": 2}]}, format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        items = {i["client_code"]: i["quantity"] for i in r.data["items"]}
+        self.assertEqual(items, {"Q1": 5, "Q2": 1})
+        self.assertEqual(r.data["client_codes"], ["Q1", "Q2"])
+        r = self.client.post("/api/warehouse-orders/", {"client_codes": [{"code": "Q9", "quantity": 0}]}, format="json")
+        self.assertEqual(r.status_code, 400)
+
+    def test_public_intake_with_quantities_and_receive_places(self):
+        cache.clear()
+        r = self.client.post("/api/public/intake/", {"branch": self.b1.id, "phone": "996700333444", "name": "К", "client_codes": [{"code": "P1", "quantity": 4}]}, format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        it = WarehouseItem.objects.get(client_code="P1")
+        self.assertEqual(it.quantity, 4)
+        it.locate(by_user=self.wh1)
+        self.client.force_authenticate(self.op1)
+        r = self.client.post(f"/api/warehouse-items/{it.id}/receive/", {"price_som": "500", "quantity": 3, "account": self.acc.id}, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        it.refresh_from_db()
+        self.assertEqual((it.quantity, it.sale.places, r.data["quantity"]), (3, 3, 3))
+
+
+class LocateQuantityTests(Base):
+    def test_partial_find_splits_remainder(self):
+        o = WarehouseOrder.objects.create(branch=self.b1, created_by=self.op1, client_codes=["S1"])
+        it = WarehouseItem.objects.create(order=o, client_code="S1", quantity=5)
+        self.client.force_authenticate(self.wh1)
+        r = self.client.post(f"/api/warehouse-items/{it.id}/locate/", {"quantity": 9}, format="json")
+        self.assertEqual(r.status_code, 400)
+        r = self.client.post(f"/api/warehouse-items/{it.id}/locate/", {"quantity": 3}, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual((r.data["status"], r.data["quantity"]), ("LOCATED", 3))
+        rest = WarehouseItem.objects.get(order=o, status="NOT_FOUND")
+        self.assertEqual((rest.quantity, rest.reason), (2, "Склад нашёл 3 из 5 мест"))
+        # сотрудник видит обе строки
+        self.client.force_authenticate(self.op1)
+        rows = {(x["status"], x["quantity"]) for x in self.client.get("/api/warehouse-items/mine/").data["results"]}
+        self.assertEqual(rows, {("LOCATED", 3), ("NOT_FOUND", 2)})
+
+    def test_full_find_no_split(self):
+        o = WarehouseOrder.objects.create(branch=self.b1, created_by=self.op1, client_codes=["S2"])
+        it = WarehouseItem.objects.create(order=o, client_code="S2", quantity=2)
+        self.client.force_authenticate(self.wh1)
+        r = self.client.post(f"/api/warehouse-items/{it.id}/locate/", {}, format="json")
+        self.assertEqual((r.status_code, r.data["quantity"]), (200, 2))
+        self.assertEqual(o.items.count(), 1)

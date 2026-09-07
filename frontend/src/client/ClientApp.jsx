@@ -39,6 +39,7 @@ export default function ClientApp() {
 
   const [track, setTrack] = useState(null)   // { found, client, bonus, items }
   const [inputs, setInputs] = useState([''])
+  const [qtys, setQtys] = useState([1])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [toast, setToast] = useState('')
@@ -119,7 +120,7 @@ export default function ClientApp() {
       await api.post('/public/intake/', {
         branch: Number(branchId), phone,
         name: (track?.client?.name || name || '').trim(),
-        client_codes: codes,
+        client_codes: inputs.map((x, i) => ({ code: x.trim(), quantity: Math.max(1, parseInt(qtys[i], 10) || 1) })).filter((x) => x.code),
       })
       setInputs([''])
       showToast(`Отправлено на склад: ${codes.length}`)
@@ -222,20 +223,22 @@ export default function ClientApp() {
           </section>
         ) : (
         <section className="sec rise">
-          <div className="sec-h"><h2>Впишите коды посылок</h2><span className="a">{codes.length}/{MAX}</span></div>
+          <div className="sec-h"><h2>Впишите коды посылок</h2><span className="a">код · сколько мест · {codes.length}/{MAX}</span></div>
           <div className="card" style={{ padding: 16 }}>
             {inputs.map((c, i) => (
               <div className="addrow" key={i}>
                 <input className="inp code-inp" value={c} placeholder="Код клиента, напр. 29520" inputMode="numeric"
                   onChange={(e) => setInputs((xs) => xs.map((x, idx) => (idx === i ? e.target.value : x)))} />
+                <input className="inp qty-inp" type="number" min="1" max="999" inputMode="numeric" value={qtys[i] ?? 1} title="Сколько мест"
+                  onChange={(e) => setQtys((qs) => qs.map((q, idx) => (idx === i ? e.target.value : q)))} />
                 {inputs.length > 1 && (
                   <button type="button" className="code-x" title="Убрать"
-                    onClick={() => setInputs((xs) => xs.filter((_, idx) => idx !== i))}>✕</button>
+                    onClick={() => { setInputs((xs) => xs.filter((_, idx) => idx !== i)); setQtys((qs) => qs.filter((_, idx) => idx !== i)) }}>✕</button>
                 )}
               </div>
             ))}
             {inputs.length < MAX && (
-              <button type="button" className="add-more" onClick={() => setInputs((xs) => [...xs, ''])}>+ Ещё код</button>
+              <button type="button" className="add-more" onClick={() => { setInputs((xs) => [...xs, '']); setQtys((qs) => [...qs, 1]) }}>+ Ещё код</button>
             )}
             <button className="btn" disabled={busy} onClick={submitCodes}>{busy ? 'Отправка…' : 'Отправить на склад'}</button>
             {knownCode && <button type="button" className="add-more" onClick={() => setManualCodes(false)}>← Вернуться к своему коду</button>}
@@ -344,7 +347,7 @@ function ItemCard({ item }) {
   if (!found) {
     return (
       <div className="item rise">
-        <div className="item-top"><div className="code"><span className="l">Код</span>{item.client_code}</div>
+        <div className="item-top"><div className="code"><span className="l">Код</span>{item.client_code}{item.quantity > 1 ? ` × ${item.quantity}` : ''}</div>
           <span className="badge b-wait"><span className="dot" />{item.status === 'LOCATED' ? 'Нашли · взвешиваем' : 'В пути · ищем'}</span></div>
         {rail('search')}
         <div className="note">{item.status === 'LOCATED' ? 'Посылка найдена, сотрудник взвешивает — сумма появится через минуту.' : 'Груз ещё не оприходован. Обычно 1–2 дня — статус обновится сам.'}</div>

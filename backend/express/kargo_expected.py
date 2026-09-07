@@ -76,7 +76,8 @@ def sync_expected(stdout=None):
             if code not in client_cache:
                 client_cache[code] = Client.objects.filter(code=code).first()
             order = _open_kargo_order(code, b, client_cache[code])
-            WarehouseItem.objects.create(order=order, client_code=code, status=WarehouseItem.Status.EXPECTED, sale=sale)
+            WarehouseItem.objects.create(order=order, client_code=code, status=WarehouseItem.Status.EXPECTED, sale=sale,
+                                         quantity=max(1, sale.places or 1))
             stats["expected_created"] += 1
 
         # 2) ожидаемые, которые сайт уже взвесил/выдал сам (админка Kargoosh) — отражаем

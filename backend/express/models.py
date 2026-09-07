@@ -417,6 +417,8 @@ class WarehouseItem(models.Model):
         WarehouseOrder, on_delete=models.CASCADE, related_name="items", verbose_name="Заявка",
     )
     client_code = models.CharField(max_length=120, verbose_name="Код клиента")
+    # Сколько мест (коробок) под этим кодом ожидается; уходит в продажу как ``places``.
+    quantity = models.PositiveIntegerField(default=1, verbose_name="Кол-во мест")
     status = models.CharField(
         max_length=12, choices=Status.choices, default=Status.IN_SEARCH, verbose_name="Статус",
     )
@@ -449,7 +451,7 @@ class WarehouseItem(models.Model):
     def __str__(self) -> str:
         return f"{self.client_code} · {self.get_status_display()}"
 
-    def receive(self, weight_kg=None, account=None, by_user=None, tracking_number=None, price_som=None):
+    def receive(self, weight_kg=None, account=None, by_user=None, tracking_number=None, price_som=None, quantity=None):
         """Оприходовать позицию: создать официальную продажу Express.
 
         Сотрудник вводит СУММУ (``price_som``) — продажа «прямой суммой»; вес, если
@@ -472,6 +474,10 @@ class WarehouseItem(models.Model):
             estimated = True
         mode = Sale.AmountMode.DIRECT if price is not None else Sale.AmountMode.WEIGHT
         track = (tracking_number or "").strip() or None
+        # Кол-во мест: сколько реально нашли (уточнение при оприходовании), иначе как в заявке.
+        if quantity:
+            self.quantity = int(quantity)
+        places = max(1, int(self.quantity or 1))
         # Атомарно: мост Loko → Kargoosh срабатывает по on_commit и должен видеть
         # продажу уже привязанной к позиции (иначе она уйдёт как «прямая», статус 3).
         with transaction.atomic():
@@ -481,6 +487,7 @@ class WarehouseItem(models.Model):
                 sale = self.sale
                 sale.amount_mode = mode
                 sale.weight_kg = weight
+                sale.places = places
                 sale.weight_is_estimated = estimated
                 if price is not None:
                     sale.price_som = price
@@ -504,6 +511,7 @@ class WarehouseItem(models.Model):
                     client_code=self.client_code,
                     amount_mode=mode,
                     weight_kg=weight,
+                    places=places,
                     weight_is_estimated=estimated,
                     price_som=price if price is not None else Decimal("0"),
                     account=account,
@@ -523,12 +531,30 @@ class WarehouseItem(models.Model):
             self.save()
         return sale
 
-    def locate(self, by_user=None):
-        """Складовщик нашёл посылку: без денег, ждёт взвешивания и оприходования сотрудником."""
-        self.status = self.Status.LOCATED
-        self.reason = ""
-        self.found_by = by_user
-        self.save(update_fields=["status", "reason", "found_by", "updated_at"])
+    def locate(self, by_user=None, found_quantity=None):
+        """Складовщик нашёл посылку: без денег, ждёт оприходования сотрудником.
+
+        ``found_quantity`` — сколько мест нашли из ожидаемых ``quantity``. Если меньше,
+        остаток отделяется в новую позицию «не найдено» с причиной: сотрудник видит,
+        что N мест на складе нет, и может убрать их из чека в вечерний допоиск."""
+        expected = max(1, int(self.quantity or 1))
+        found = expected if found_quantity in (None, "") else int(found_quantity)
+        if found < 1 or found > expected:
+            raise ValueError(f"Найдено должно быть от 1 до {expected}.")
+        remainder = None
+        with transaction.atomic():
+            if found < expected:
+                remainder = WarehouseItem.objects.create(
+                    order=self.order, client_code=self.client_code, quantity=expected - found,
+                    status=self.Status.NOT_FOUND, found_by=by_user,
+                    reason=f"Склад нашёл {found} из {expected} мест",
+                )
+                self.quantity = found
+            self.status = self.Status.LOCATED
+            self.reason = ""
+            self.found_by = by_user
+            self.save(update_fields=["status", "reason", "found_by", "quantity", "updated_at"])
+        return remainder
 
     def mark_not_found(self, reason, by_user=None):
         """Отметить, что товара нет на складе (без создания продажи)."""

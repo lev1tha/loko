@@ -162,6 +162,36 @@ class ClientPriceSerializer(serializers.ModelSerializer):
         return value
 
 
+def normalize_codes(value, max_codes):
+    """Коды заявки: список строк («AL-1») или объектов ``{"code": "AL-1", "quantity": 3}``.
+    Возвращает (коды, {код: кол-во}); дубли схлопываются (количества складываются)."""
+    if not isinstance(value, list):
+        raise serializers.ValidationError("Коды клиентов должны быть списком.")
+    codes, qty = [], {}
+    for raw in value:
+        if isinstance(raw, dict):
+            code = str(raw.get("code") or "").strip()
+            try:
+                q_raw = raw.get("quantity")
+                q = 1 if q_raw in (None, "") else int(q_raw)
+            except (TypeError, ValueError):
+                raise serializers.ValidationError("Кол-во мест должно быть целым числом.")
+        else:
+            code, q = str(raw).strip(), 1
+        if not code:
+            continue
+        if q < 1 or q > 999:
+            raise serializers.ValidationError("Кол-во мест: от 1 до 999.")
+        if code in qty:
+            qty[code] += q
+        else:
+            codes.append(code)
+            qty[code] = q
+    if len(codes) > max_codes:
+        raise serializers.ValidationError(f"Не больше {max_codes} кодов клиента.")
+    return codes, qty
+
+
 class WarehouseItemSerializer(serializers.ModelSerializer):
     """Позиция заявки — один код с его статусом (для доски склада и «Мои продажи»).
 
@@ -185,7 +215,7 @@ class WarehouseItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = WarehouseItem
         fields = (
-            "id", "order_id", "client_code", "status", "status_display",
+            "id", "order_id", "client_code", "quantity", "status", "status_display",
             "weight_kg", "price_som", "reason", "branch", "branch_name", "created_by", "created_by_name",
             "found_by_name", "received_by_name",
             "tracking_number", "shipment_date", "weight_is_estimated", "created_at", "updated_at",
@@ -224,13 +254,12 @@ class WarehouseOrderSerializer(serializers.ModelSerializer):
         }
 
     def validate_client_codes(self, value):
-        if not isinstance(value, list):
-            raise serializers.ValidationError("Коды клиентов должны быть списком.")
-        codes = [str(c).strip() for c in value if str(c).strip()]
-        if not (1 <= len(codes) <= WarehouseOrder.MAX_CODES):
+        codes, qty = normalize_codes(value, WarehouseOrder.MAX_CODES)
+        if not codes:
             raise serializers.ValidationError(
                 f"Укажите от 1 до {WarehouseOrder.MAX_CODES} кодов клиентов."
             )
+        self.quantities = qty   # читает perform_create
         return codes
 
 
@@ -250,6 +279,8 @@ class WarehouseReceiveSerializer(serializers.Serializer):
     weight_kg = serializers.DecimalField(
         max_digits=10, decimal_places=3, min_value=Decimal("0.001"), required=False, allow_null=True,
     )
+    # Сколько мест реально нашли (если отличается от заявки).
+    quantity = serializers.IntegerField(min_value=1, max_value=999, required=False, allow_null=True)
     account = serializers.PrimaryKeyRelatedField(
         queryset=Account.objects.filter(module="EXPRESS", currency="KGS", is_active=True),
     )
@@ -269,6 +300,12 @@ class WarehouseReceiveSerializer(serializers.Serializer):
         if attrs.get("price_som") is None and attrs.get("weight_kg") is None:
             raise serializers.ValidationError({"price_som": "Укажите сумму (или вес, если взвесили)."})
         return attrs
+
+
+class WarehouseLocateSerializer(serializers.Serializer):
+    """«Найдено»: сколько мест нашли (по умолчанию — все ожидаемые)."""
+
+    quantity = serializers.IntegerField(min_value=1, max_value=999, required=False, allow_null=True)
 
 
 class WarehouseNotFoundSerializer(serializers.Serializer):
@@ -324,7 +361,7 @@ class PublicIntakeSerializer(serializers.Serializer):
     phone = serializers.CharField(max_length=32)
     name = serializers.CharField(max_length=160, required=False, allow_blank=True, default="")
     # Коды можно не передавать: у клиента с сайта код уже есть — подставится сам.
-    client_codes = serializers.ListField(child=serializers.CharField(), allow_empty=True, required=False, default=list)
+    client_codes = serializers.ListField(child=serializers.JSONField(), allow_empty=True, required=False, default=list)
 
     def validate_phone(self, value):
         if len(Client.normalize_phone(value)) < 6:
@@ -332,15 +369,8 @@ class PublicIntakeSerializer(serializers.Serializer):
         return value
 
     def validate_client_codes(self, value):
-        codes = []
-        for c in value:
-            c = str(c).strip()
-            if c and c not in codes:
-                codes.append(c)
-        if len(codes) > WarehouseOrder.MAX_CODES:
-            raise serializers.ValidationError(
-                f"Не больше {WarehouseOrder.MAX_CODES} кодов клиента."
-            )
+        codes, qty = normalize_codes(value, WarehouseOrder.MAX_CODES)
+        self.quantities = qty
         return codes
 
 

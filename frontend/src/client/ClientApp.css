@@ -134,3 +134,5 @@
 .parcel-st { font-size: 12px; font-weight: 700; padding: 3px 9px; border-radius: 999px; background: #eef1f4; color: #3a4a5a; }
 .parcel-st.st-arrived { background: #fdf1e6; color: #b85d0c; }
 .parcel-sub { font-size: 13px; opacity: 0.75; }
+
+.client-app .addrow .qty-inp{flex:none;width:72px;text-align:center}
