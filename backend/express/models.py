@@ -99,6 +99,8 @@ class Sale(models.Model):
     cost_is_manual = models.BooleanField(
         default=False, verbose_name="Себестоимость введена вручную"
     )
+    # Вес не взвешивали, а вывели из суммы по тарифу (сотрудник ввёл только сумму).
+    weight_is_estimated = models.BooleanField(default=False, verbose_name="Вес расчётный (из суммы)")
 
     date = models.DateField(verbose_name="Дата операции")
     payment_date = models.DateField(null=True, blank=True, verbose_name="Дата оплаты")
@@ -165,6 +167,15 @@ class Sale(models.Model):
         if rate > 0 and self.price_som:
             return (self.price_som / rate).quantize(TWO_PLACES, rounding=ROUND_HALF_UP)
         return None
+
+    def unit_price_som(self) -> Decimal:
+        """Тариф за 1 кг для этой продажи: индивидуальная цена клиента, иначе
+        цена_$ × курс из Настроек."""
+        unit = self._client_unit_price()
+        if unit is not None:
+            return Decimal(unit)
+        cfg = AppSettings.load()
+        return (Decimal(cfg.price_per_kg_usd) * Decimal(cfg.usd_rate_som)).quantize(TWO_PLACES)
 
     def _client_unit_price(self):
         """Спец-цена за 1 кг (сом) для этого клиента, если задана; иначе None.
@@ -438,16 +449,28 @@ class WarehouseItem(models.Model):
     def __str__(self) -> str:
         return f"{self.client_code} · {self.get_status_display()}"
 
-    def receive(self, weight_kg, account, by_user=None, tracking_number=None):
-        """Оприходовать позицию: создать официальную продажу Express по весу и тарифу.
+    def receive(self, weight_kg=None, account=None, by_user=None, tracking_number=None, price_som=None):
+        """Оприходовать позицию: создать официальную продажу Express.
 
-        Тариф — как в режиме «по весу» (``Sale`` считает цену в ``save()``: вес ×
-        цена/кг из Настроек либо индивидуальная цена клиента). Продажа
-        атрибутируется оператору-создателю заявки; себестоимость/маржа — на продаже.
-        ``tracking_number`` — необязательный трек-номер посылки (для кабинета
-        клиента на kargoosh.kg; без него мост подставит LOKO-<id>).
+        Сотрудник вводит СУММУ (``price_som``) — продажа «прямой суммой»; вес, если
+        не взвешивали, выводится из суммы по тарифу и помечается расчётным
+        (``weight_is_estimated``) — на нём держатся остаток склада и бонусы по кг.
+        Ввели вес — он точный. Без суммы, только с весом — сумма по тарифу, как раньше.
+        Продажа атрибутируется сотруднику заявки; ``tracking_number`` — трек посылки
+        (без него мост подставит LOKO-<id>).
         """
-        weight = Decimal(str(weight_kg)).quantize(THREE_PLACES, rounding=ROUND_HALF_UP)
+        if weight_kg in (None, "") and price_som in (None, ""):
+            raise ValueError("Нужна сумма или вес.")
+        price = Decimal(str(price_som)).quantize(TWO_PLACES, rounding=ROUND_HALF_UP) if price_som not in (None, "") else None
+        estimated = False
+        if weight_kg not in (None, ""):
+            weight = Decimal(str(weight_kg)).quantize(THREE_PLACES, rounding=ROUND_HALF_UP)
+        else:
+            probe = self.sale if self.sale_id else Sale(client_code=self.client_code)
+            unit = probe.unit_price_som()
+            weight = (price / unit).quantize(THREE_PLACES, rounding=ROUND_HALF_UP) if unit > 0 else None
+            estimated = True
+        mode = Sale.AmountMode.DIRECT if price is not None else Sale.AmountMode.WEIGHT
         track = (tracking_number or "").strip() or None
         # Атомарно: мост Loko → Kargoosh срабатывает по on_commit и должен видеть
         # продажу уже привязанной к позиции (иначе она уйдёт как «прямая», статус 3).
@@ -456,8 +479,11 @@ class WarehouseItem(models.Model):
                 # Ожидаемая посылка из Kargoosh: продажа уже есть (заказ «в пути»),
                 # ОБНОВЛЯЕМ её, а не создаём вторую — иначе выручка задваивается.
                 sale = self.sale
-                sale.amount_mode = Sale.AmountMode.WEIGHT
+                sale.amount_mode = mode
                 sale.weight_kg = weight
+                sale.weight_is_estimated = estimated
+                if price is not None:
+                    sale.price_som = price
                 sale.account = account
                 sale.branch = self.order.branch
                 sale.date = timezone.localdate()
@@ -476,8 +502,10 @@ class WarehouseItem(models.Model):
             else:
                 sale = Sale.objects.create(
                     client_code=self.client_code,
-                    amount_mode=Sale.AmountMode.WEIGHT,
+                    amount_mode=mode,
                     weight_kg=weight,
+                    weight_is_estimated=estimated,
+                    price_som=price if price is not None else Decimal("0"),
                     account=account,
                     branch=self.order.branch,
                     date=timezone.localdate(),

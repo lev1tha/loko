@@ -178,6 +178,7 @@ class WarehouseItemSerializer(serializers.ModelSerializer):
     # Ожидаемая посылка из Kargoosh: трек и дата отправки из связанной продажи.
     tracking_number = serializers.CharField(source="sale.tracking_number", read_only=True, default=None)
     shipment_date = serializers.DateField(source="sale.shipment_date", read_only=True, default=None)
+    weight_is_estimated = serializers.BooleanField(source="sale.weight_is_estimated", read_only=True, default=False)
     found_by_name = serializers.CharField(source="found_by.username", read_only=True, default=None)
     received_by_name = serializers.CharField(source="received_by.username", read_only=True, default=None)
 
@@ -187,7 +188,7 @@ class WarehouseItemSerializer(serializers.ModelSerializer):
             "id", "order_id", "client_code", "status", "status_display",
             "weight_kg", "price_som", "reason", "branch", "branch_name", "created_by", "created_by_name",
             "found_by_name", "received_by_name",
-            "tracking_number", "shipment_date", "created_at", "updated_at",
+            "tracking_number", "shipment_date", "weight_is_estimated", "created_at", "updated_at",
         )
         read_only_fields = fields
 
@@ -241,10 +242,13 @@ class WarehouseStatusSerializer(serializers.Serializer):
 
 
 class WarehouseReceiveSerializer(serializers.Serializer):
-    """Оприходование позиции складовщиком: фактический вес + счёт зачисления."""
+    """Оприходование позиции: сумма (обязательна, если нет веса) и/или вес + счёт."""
 
+    price_som = serializers.DecimalField(
+        max_digits=14, decimal_places=2, min_value=Decimal("0.01"), required=False, allow_null=True,
+    )
     weight_kg = serializers.DecimalField(
-        max_digits=10, decimal_places=3, min_value=Decimal("0.001"),
+        max_digits=10, decimal_places=3, min_value=Decimal("0.001"), required=False, allow_null=True,
     )
     account = serializers.PrimaryKeyRelatedField(
         queryset=Account.objects.filter(module="EXPRESS", currency="KGS", is_active=True),
@@ -260,6 +264,11 @@ class WarehouseReceiveSerializer(serializers.Serializer):
         if value and Sale.objects.filter(tracking_number=value).exists():
             raise serializers.ValidationError("Продажа с таким трек-номером уже есть.")
         return value
+
+    def validate(self, attrs):
+        if attrs.get("price_som") is None and attrs.get("weight_kg") is None:
+            raise serializers.ValidationError({"price_som": "Укажите сумму (или вес, если взвесили)."})
+        return attrs
 
 
 class WarehouseNotFoundSerializer(serializers.Serializer):

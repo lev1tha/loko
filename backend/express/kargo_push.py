@@ -89,7 +89,7 @@ def sale_row(sale, admin_by_region, default_admin):
         "s_user_code": code[:15],
         "s_tracking_number": track[:100],
         "i_quantity": sale.places or 1,
-        "i_weight": sale.weight_kg or 0,
+        "i_weight": 0 if sale.weight_is_estimated else (sale.weight_kg or 0),   # расчётный вес клиенту не показываем
         "i_price": sale.price_som or 0,
         "dt_shipment": _dt(shipment),
         "dt_arrival": _dt(arrival),

@@ -8,7 +8,7 @@ const FOUND = new Set(['FOUND', 'DELIVERED'])
 
 // Подпись статуса позиции глазами сотрудника.
 function itemMeta(s) {
-  if (FOUND.has(s.status)) return `оприходовано${s.weight_kg ? ` · ${kg(s.weight_kg)}` : ''}`
+  if (FOUND.has(s.status)) return `оприходовано${s.weight_kg ? ` · ${s.weight_is_estimated ? '≈ ' : ''}${kg(s.weight_kg)}` : ''}`
   if (s.status === 'LOCATED') return `склад нашёл${s.found_by_name ? ` (${s.found_by_name})` : ''} · взвесьте и оприходуйте`
   if (s.status === 'NOT_FOUND') return `не найдено${s.reason ? ` · ${s.reason}` : ''}`
   if (s.status === 'EVENING') return 'убрано из чека · вечерний допоиск'
@@ -42,6 +42,7 @@ export function OperatorItemRow({ item, busyId, onReceive, onDismiss }) {
 // Модалка оприходования сотрудником: вес, счёт, трек-номер → продажа с ценой.
 export function ReceiveModal({ item, onClose, onDone }) {
   const accounts = asList(useFetch('/warehouse-items/accounts/').data)
+  const [amount, setAmount] = useState('')
   const [weight, setWeight] = useState('')
   const [tracking, setTracking] = useState(item.tracking_number || '')
   const [accountId, setAccountId] = useState('')
@@ -51,11 +52,15 @@ export function ReceiveModal({ item, onClose, onDone }) {
 
   async function submit(e) {
     e?.preventDefault?.()
-    if (!(parseFloat(weight) > 0)) { setError('Укажите вес больше нуля.'); return }
+    const sum = parseFloat(String(amount).replace(',', '.'))
+    if (!(sum > 0)) { setError('Укажите сумму больше нуля.'); return }
+    if (weight !== '' && !(parseFloat(weight) > 0)) { setError('Вес должен быть больше нуля, либо оставьте поле пустым.'); return }
     if (!acc) { setError('Нет счёта зачисления, обратитесь к администратору.'); return }
     setBusy(true); setError('')
     try {
-      await api.post(`/warehouse-items/${item.id}/receive/`, { weight_kg: weight, account: acc, tracking_number: tracking.trim() })
+      await api.post(`/warehouse-items/${item.id}/receive/`, {
+        price_som: sum.toFixed(2), weight_kg: weight !== '' ? weight : null, account: acc, tracking_number: tracking.trim(),
+      })
       onDone()
     } catch (err) {
       setError(errorMessage(err))
@@ -78,10 +83,13 @@ export function ReceiveModal({ item, onClose, onDone }) {
       <form onSubmit={submit}>
         {error && <Alert kind="error">{error}</Alert>}
         <p className="caption" style={{ margin: '0 0 8px', lineHeight: 1.5 }}>
-          Склад нашёл посылку{item.found_by_name ? ` (${item.found_by_name})` : ''}. Взвесьте её: сумма посчитается по тарифу, продажа запишется на вас.
+          Склад нашёл посылку{item.found_by_name ? ` (${item.found_by_name})` : ''}. Впишите сумму — продажа запишется на вас. Вес по желанию: без него он посчитается из суммы по тарифу.
         </p>
-        <Field label="Фактический вес, кг">
-          <input className="input" type="number" step="0.001" min="0" value={weight} onChange={(e) => setWeight(e.target.value)} placeholder="5" autoFocus />
+        <Field label="Сумма, сом">
+          <input className="input" type="number" step="0.01" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="810" autoFocus />
+        </Field>
+        <Field label="Вес, кг" hint="Необязательно, если взвесили">
+          <input className="input" type="number" step="0.001" min="0" value={weight} onChange={(e) => setWeight(e.target.value)} placeholder="≈ из суммы" />
         </Field>
         <Field label="Трек-номер посылки" hint="Необязательно. Клиент увидит его в кабинете kargoosh.kg">
           <input className="input" value={tracking} onChange={(e) => setTracking(e.target.value)} placeholder="YT8872477816368" />

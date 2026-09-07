@@ -31,6 +31,7 @@ export default function WarehouseDashboard() {
 
   // Модалка оприходования: позиция + вес + счёт зачисления.
   const [receiveItem, setReceiveItem] = useState(null)
+  const [amount, setAmount] = useState('')
   const [weight, setWeight] = useState('')
   const [accountId, setAccountId] = useState('')
   const [tracking, setTracking] = useState('')
@@ -70,6 +71,7 @@ export default function WarehouseDashboard() {
   function openReceive(item) {
     setError('')
     setReceiveItem(item)
+    setAmount('')
     setWeight('')
     setTracking(item.tracking_number || '')
     setOperators([])
@@ -90,14 +92,16 @@ export default function WarehouseDashboard() {
   async function submitReceive(e) {
     e?.preventDefault?.()
     if (!receiveItem) return
-    if (!(parseFloat(weight) > 0)) { setError('Укажите вес больше нуля.'); return }
+    const sum = parseFloat(String(amount).replace(',', '.'))
+    if (!(sum > 0)) { setError('Укажите сумму больше нуля.'); return }
+    if (weight !== '' && !(parseFloat(weight) > 0)) { setError('Вес должен быть больше нуля, либо оставьте поле пустым.'); return }
     if (!accountId) { setError('Выберите счёт зачисления.'); return }
     if (!receiveItem.created_by && !operatorId) { setError('Выберите сотрудника, кому засчитать заявку клиента.'); return }
     setBusyId(receiveItem.id)
     setError('')
     try {
       await api.post(`/warehouse-items/${receiveItem.id}/receive/`, {
-        weight_kg: weight, account: accountId, tracking_number: tracking.trim(),
+        price_som: sum.toFixed(2), weight_kg: weight !== '' ? weight : null, account: accountId, tracking_number: tracking.trim(),
         ...(operatorId ? { operator: operatorId } : {}),
       })
       setReceiveItem(null)
@@ -272,14 +276,13 @@ export default function WarehouseDashboard() {
           }
         >
           <p className="caption" style={{ margin: 0, lineHeight: 1.5 }}>
-            Введите фактический вес — сумма посчитается по тарифу и создастся продажа.
+            Впишите сумму — создастся продажа. Вес по желанию: без него он посчитается из суммы по тарифу.
           </p>
-          <Field label="Фактический вес, кг">
-            <input
-              className="input" type="number" step="0.001" min="0"
-              value={weight} onChange={(e) => setWeight(e.target.value)}
-              placeholder="5" autoFocus
-            />
+          <Field label="Сумма, сом">
+            <input className="input" type="number" step="0.01" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="810" autoFocus />
+          </Field>
+          <Field label="Вес, кг" hint="Необязательно, если взвесили">
+            <input className="input" type="number" step="0.001" min="0" value={weight} onChange={(e) => setWeight(e.target.value)} placeholder="≈ из суммы" />
           </Field>
           {!receiveItem.created_by && (
             <Field label="Кому засчитать" hint="Заявка пришла от клиента по QR — закрепите за сотрудником филиала">
@@ -362,7 +365,7 @@ function ItemRow({ item, showBranch, busyId, onReceive, onNotFound, onLocate, ca
 
       {found ? (
         <div className="wh-item-fin">
-          {item.weight_kg && <span className="muted">{kg(item.weight_kg)}</span>}
+          {item.weight_kg && <span className="muted">{item.weight_is_estimated ? '≈ ' : ''}{kg(item.weight_kg)}</span>}
           <strong>{som(item.price_som)}</strong>
         </div>
       ) : (

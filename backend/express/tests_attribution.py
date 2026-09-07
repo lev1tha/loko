@@ -174,3 +174,35 @@ class AssignCommandTests(Base):
         o.refresh_from_db(); self.assertEqual(o.created_by.username, "op1b")
         with self.assertRaises(Exception):
             call_command("assign_client_orders", "--branch", str(self.b1.id), "--operator", "op2", stdout=out)  # другой филиал
+
+
+class ReceiveByAmountTests(Base):
+    def _located(self, code="AL-12345"):
+        o = WarehouseOrder.objects.create(branch=self.b1, created_by=self.op1, client_codes=[code])
+        it = WarehouseItem.objects.create(order=o, client_code=code)
+        it.locate(by_user=self.wh1)
+        return it
+
+    def test_amount_only_estimates_weight(self):
+        it = self._located()
+        self.client.force_authenticate(self.op1)
+        r = self.client.post(f"/api/warehouse-items/{it.id}/receive/", {"price_som": "810", "account": self.acc.id}, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        it.refresh_from_db()
+        self.assertEqual((it.sale.amount_mode, it.sale.price_som, it.sale.weight_kg, it.sale.weight_is_estimated), ("DIRECT", Decimal("810.00"), Decimal("3.000"), True))
+        self.assertEqual((r.data["weight_kg"], r.data["weight_is_estimated"], r.data["price_som"]), ("3.000", True, "810.00"))
+
+    def test_amount_and_weight_exact(self):
+        it = self._located()
+        self.client.force_authenticate(self.op1)
+        r = self.client.post(f"/api/warehouse-items/{it.id}/receive/", {"price_som": "1000", "weight_kg": "2.5", "account": self.acc.id}, format="json")
+        self.assertEqual(r.status_code, 200, r.data)
+        it.refresh_from_db()
+        self.assertEqual((it.sale.price_som, it.sale.weight_kg, it.sale.weight_is_estimated), (Decimal("1000.00"), Decimal("2.500"), False))
+
+    def test_neither_amount_nor_weight_rejected(self):
+        it = self._located()
+        self.client.force_authenticate(self.op1)
+        r = self.client.post(f"/api/warehouse-items/{it.id}/receive/", {"account": self.acc.id}, format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("price_som", r.data)

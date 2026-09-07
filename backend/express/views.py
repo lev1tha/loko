@@ -651,8 +651,9 @@ class WarehouseItemViewSet(viewsets.ReadOnlyModelViewSet):
                 raise serializers.ValidationError({"operator": "Сотрудник должен быть из филиала заявки."})
             order.assign_operator(operator)
         item.receive(
-            ser.validated_data["weight_kg"], ser.validated_data["account"], by_user=request.user,
+            ser.validated_data.get("weight_kg"), ser.validated_data["account"], by_user=request.user,
             tracking_number=ser.validated_data.get("tracking_number") or None,
+            price_som=ser.validated_data.get("price_som"),
         )
         return Response(WarehouseItemSerializer(item).data)
 
