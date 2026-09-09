@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { useFetch, asList } from '../lib/hooks'
+import { useMemo, useState } from 'react'
+import { useFetch, usePoll, asList } from '../lib/hooks'
 import { useAuth } from '../auth/AuthContext'
 import { som, num, today, firstOfMonth, dateTimeRu } from '../lib/format'
 import { Alert, Segmented, Spinner } from '../components/ui'
@@ -43,11 +43,7 @@ export default function Workflow() {
   const req = useFetch('/reports/workflow/', params)
   const branches = asList(useFetch('/warehouse-stock/branches/').data)
 
-  useEffect(() => {
-    const t = setInterval(() => req.reload(), POLL_MS)
-    return () => clearInterval(t)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [req.reload])
+  usePoll(() => req.reload(), POLL_MS)
 
   const d = req.data
   const t = d?.totals

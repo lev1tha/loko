@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import api, { errorMessage } from '../api/client'
-import { useFetch } from '../lib/hooks'
+import { useFetch, usePoll } from '../lib/hooks'
 import { today, dateRu, kg } from '../lib/format'
 import { Alert, Field } from '../components/ui'
 import { IconPlus } from '../components/icons'
@@ -36,10 +36,7 @@ export default function OperatorSale() {
       .finally(() => setLoadingItems(false))
   }, [])
   useEffect(() => { loadItems() }, [loadItems])
-  useEffect(() => {
-    const t = setInterval(loadItems, 7000) // near-real-time: цена появляется сама
-    return () => clearInterval(t)
-  }, [loadItems])
+  usePoll(loadItems, 15000) // near-real-time: цена появляется сама
 
   function setCodeAt(i, val) {
     setCodes((cs) => cs.map((c, idx) => (idx === i ? val : c)))

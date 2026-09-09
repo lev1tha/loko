@@ -487,7 +487,7 @@ class WarehouseOrderViewSet(viewsets.ModelViewSet):
         qs = (
             WarehouseOrder.objects
             .select_related("branch", "created_by", "assigned_to")
-            .prefetch_related("items", "items__sale")
+            .prefetch_related("items", "items__sale", "items__found_by", "items__received_by")
         )
         user = self.request.user
         params = self.request.query_params
@@ -605,7 +605,9 @@ class WarehouseItemViewSet(viewsets.ReadOnlyModelViewSet):
     def get_queryset(self):
         user = self.request.user
         qs = WarehouseItem.objects.select_related(
-            "order", "order__branch", "order__created_by", "sale"
+            # found_by/received_by отдаёт сериализатор — без них на КАЖДУЮ позицию
+            # уходило по два лишних запроса (доска склада опрашивается постоянно).
+            "order", "order__branch", "order__created_by", "sale", "found_by", "received_by"
         )
         if getattr(user, "is_warehouse", False):
             qs = qs.filter(order__branch=user.branch) if user.branch_id else qs.none()
@@ -723,9 +725,12 @@ class WarehouseItemViewSet(viewsets.ReadOnlyModelViewSet):
             qs = qs.filter(created_at__gte=prev_start, created_at__lt=month_start)
         elif period != "all":
             qs = qs.filter(created_at__gte=month_start)
-        qs = qs.select_related("order", "order__branch", "order__created_by", "sale").order_by("-created_at", "-id")
+        qs = qs.select_related(
+            "order", "order__branch", "order__created_by", "sale", "found_by", "received_by"
+        ).order_by("-created_at", "-id")
         data = WarehouseItemSerializer(qs, many=True).data
-        return Response({"count": qs.count(), "period": period, "results": data})
+        # len(data), а не qs.count(): набор уже выбран, повторный COUNT — лишний запрос.
+        return Response({"count": len(data), "period": period, "results": data})
 
     @extend_schema(parameters=[OpenApiParameter("branch", OpenApiTypes.INT)], responses=OpenApiTypes.OBJECT)
     @action(detail=False, methods=["get"])

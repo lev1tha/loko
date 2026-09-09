@@ -1,12 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import api, { errorMessage } from '../api/client'
-import { useFetch, asList } from '../lib/hooks'
+import { useFetch, usePoll, asList } from '../lib/hooks'
 import { prompt } from '../lib/dialogs'
 import { useAuth } from '../auth/AuthContext'
 import { som, kg } from '../lib/format'
 import { Alert, Field, Modal, Spinner } from '../components/ui'
 
-const POLL_MS = 7000
+const POLL_MS = 15000
 
 // Короткое имя филиала для карточки: "Loko Express — Гульчинская улица, 13/1" → "Гульчинская, 13/1".
 function shortBranch(name) {
@@ -61,12 +61,22 @@ export default function WarehouseDashboard() {
   const expected = asList(expectedReq.data)
   const expectedTotal = expectedReq.data?.count ?? expected.length
 
-  // Авто-обновление обеих лент (near-real-time без WebSocket).
-  useEffect(() => {
-    const t = setInterval(() => { dayReq.reload(); eveningReq.reload(); expectedReq.reload() }, POLL_MS)
-    return () => clearInterval(t)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dayReq.reload, eveningReq.reload, expectedReq.reload])
+  // Авто-обновление лент (near-real-time без WebSocket). Часто обновляем только
+  // открытую вкладку: три ленты разом — самый дорогой запрос доски, а прод
+  // крутится на одном ядре. Остальные две — раз в минуту, чтобы счётчики на
+  // вкладках не отставали.
+  const tick = useRef(0)
+  usePoll(() => {
+    tick.current += 1
+    if (tab === 'evening') eveningReq.reload()
+    else if (tab === 'expected') expectedReq.reload()
+    else dayReq.reload()
+    if (tick.current % 4 === 0) {
+      if (tab !== 'day') dayReq.reload()
+      if (tab !== 'expected') expectedReq.reload()
+      if (tab !== 'evening') eveningReq.reload()
+    }
+  }, POLL_MS)
 
   function openReceive(item) {
     setError('')
