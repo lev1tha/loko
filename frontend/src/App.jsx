@@ -1,5 +1,6 @@
+import { Suspense, lazy } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
-import ClientApp from './client/ClientApp'
+import { Spinner } from './components/ui'
 import { DialogHost } from './lib/dialogs'
 import { AuthProvider, useAuth } from './auth/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
@@ -9,47 +10,57 @@ import OperatorLayout from './components/OperatorLayout'
 import DirectorLayout from './components/DirectorLayout'
 import Login from './pages/Login'
 import NotFound from './pages/NotFound'
-import Dashboard from './pages/Dashboard'
-import Control from './pages/Control'
-import Sales from './pages/Sales'
-import Clients from './pages/Clients'
-import ClientPrices from './pages/ClientPrices'
-import OtherIncome from './pages/OtherIncome'
-import OperatorSale from './pages/OperatorSale'
-import OperatorMySales from './pages/OperatorMySales'
 import WarehouseLayout from './components/WarehouseLayout'
-import WarehouseDashboard from './pages/WarehouseDashboard'
-import Workflow from './pages/Workflow'
-import DirectorHome from './pages/DirectorHome'
-import DirectorIncome from './pages/DirectorIncome'
-import DirectorExpense from './pages/DirectorExpense'
-import WarehouseStock from './pages/WarehouseStock'
-import Expenses from './pages/Expenses'
-import Accounts from './pages/Accounts'
-import Transfers from './pages/Transfers'
-import Deposits from './pages/Deposits'
-import Debts from './pages/Debts'
-import BusinessOrders from './pages/BusinessOrders'
-import Journal from './pages/Journal'
-import Calculator from './pages/Calculator'
-import Reports from './pages/Reports'
-import Bonuses from './pages/Bonuses'
-import Settings from './pages/Settings'
-import Users from './pages/Users'
-import Branches from './pages/Branches'
-import Guide from './pages/Guide'
+
+// Страницы грузятся по требованию: у складовщика и сотрудника в стартовом бандле нет
+// ни отчётов, ни админки. Оболочки и логин остаются в основном чанке.
+const ClientApp = lazy(() => import('./client/ClientApp'))
+const Dashboard = lazy(() => import('./pages/Dashboard'))
+const Control = lazy(() => import('./pages/Control'))
+const Sales = lazy(() => import('./pages/Sales'))
+const Clients = lazy(() => import('./pages/Clients'))
+const ClientPrices = lazy(() => import('./pages/ClientPrices'))
+const OtherIncome = lazy(() => import('./pages/OtherIncome'))
+const OperatorSale = lazy(() => import('./pages/OperatorSale'))
+const OperatorMySales = lazy(() => import('./pages/OperatorMySales'))
+const WarehouseDashboard = lazy(() => import('./pages/WarehouseDashboard'))
+const Workflow = lazy(() => import('./pages/Workflow'))
+const DirectorHome = lazy(() => import('./pages/DirectorHome'))
+const DirectorIncome = lazy(() => import('./pages/DirectorIncome'))
+const DirectorExpense = lazy(() => import('./pages/DirectorExpense'))
+const WarehouseStock = lazy(() => import('./pages/WarehouseStock'))
+const Expenses = lazy(() => import('./pages/Expenses'))
+const Accounts = lazy(() => import('./pages/Accounts'))
+const Transfers = lazy(() => import('./pages/Transfers'))
+const Deposits = lazy(() => import('./pages/Deposits'))
+const Debts = lazy(() => import('./pages/Debts'))
+const BusinessOrders = lazy(() => import('./pages/BusinessOrders'))
+const Journal = lazy(() => import('./pages/Journal'))
+const Calculator = lazy(() => import('./pages/Calculator'))
+const Reports = lazy(() => import('./pages/Reports'))
+const Bonuses = lazy(() => import('./pages/Bonuses'))
+const Settings = lazy(() => import('./pages/Settings'))
+const Users = lazy(() => import('./pages/Users'))
+const Branches = lazy(() => import('./pages/Branches'))
+const Guide = lazy(() => import('./pages/Guide'))
 
 export default function App() {
   // Публичная клиентская страница по QR (/track?b=…) — отдельное приложение без
   // входа и вне AuthProvider (клиент узнаётся по телефону, не по JWT).
   if (window.location.pathname.startsWith('/track')) {
-    return <ClientApp />
+    return (
+      <Suspense fallback={<Spinner full />}>
+        <ClientApp />
+      </Suspense>
+    )
   }
   return (
     <AuthProvider>
       <BrowserRouter>
         <ErrorBoundary>
-          <AppRoutes />
+          <Suspense fallback={<Spinner full />}>
+            <AppRoutes />
+          </Suspense>
           <DialogHost />
         </ErrorBoundary>
       </BrowserRouter>

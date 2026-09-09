@@ -1011,6 +1011,13 @@ class WarehouseStockViewSet(viewsets.ModelViewSet):
 
     @extend_schema(responses=OpenApiTypes.OBJECT)
     @action(detail=False, methods=["get"])
+    def summaries(self, request):
+        """Остатки всех активных филиалов одним запросом (сводка директора вместо
+        N запросов по филиалу). Ключ — id филиала."""
+        return Response({str(b.id): build_stock(b.id) for b in Branch.objects.filter(is_active=True).order_by("name")})
+
+    @extend_schema(responses=OpenApiTypes.OBJECT)
+    @action(detail=False, methods=["get"])
     def branches(self, request):
         """Пикер филиалов для страницы остатка (директору обычные /branches/ закрыты)."""
         qs = Branch.objects.filter(is_active=True).order_by("name")

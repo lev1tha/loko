@@ -197,6 +197,16 @@ class StockTests(Base):
         self.assertEqual(self.client.delete(f"/api/warehouse-stock/{eid}/").status_code, 204)
         self.assertEqual(WarehouseStock.objects.count(), 0)
 
+    def test_summaries_all_branches_one_request(self):
+        WarehouseStock.objects.create(branch=self.b2, date=timezone.localdate(), kg=Decimal("12"))
+        self.as_(self.dir_ex)
+        r = self.client.get("/api/warehouse-stock/summaries/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data[str(self.b2.id)]["balance_kg"], "12.000")
+        self.assertIsNone(r.data[str(self.b1.id)]["since"])
+        self.as_(self.wh)
+        self.assertEqual(self.client.get("/api/warehouse-stock/summaries/").status_code, 403)
+
     def test_summary_default_branch_and_empty(self):
         self.as_(self.dir_ex)
         r = self.client.get("/api/warehouse-stock/summary/")

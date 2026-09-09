@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useFetch, asList } from '../lib/hooks'
 import { useAuth } from '../auth/AuthContext'
@@ -66,8 +66,9 @@ export default function DirectorHome() {
   const monthly = useFetch('/reports/monthly/', { from: monthsAgoFirst(5), to: today(), report: 'pnl', module })
   const wf = useFetch(hasWarehouse ? '/reports/workflow/' : null, {})
   const branches = asList(useFetch(hasWarehouse ? '/warehouse-stock/branches/' : null).data)
-  const [stock, setStock] = useState({})
-  const onStock = useCallback((id, d) => setStock((s) => ({ ...s, [id]: d })), [])
+  // Остатки всех филиалов одним запросом (раньше — по запросу на филиал).
+  const stockReq = useFetch(hasWarehouse ? '/warehouse-stock/summaries/' : null, {})
+  const stock = stockReq.data || {}
 
   const p = pnl.data, pp = pnlPrev.data, c = cash.data, t = wf.data?.totals
   if (!p || (hasWarehouse && !t)) return <Spinner full />
@@ -128,11 +129,9 @@ export default function DirectorHome() {
       {hasWarehouse && (
         <div className="dir-cols">
           <PeoplePanel employees={wf.data?.employees || []} />
-          <StockPanel branches={branches} stock={stock} onStock={onStock} />
+          <StockPanel branches={branches} stock={stock} loaded={!!stockReq.data} />
         </div>
       )}
-      {/* невидимые загрузчики остатков по филиалам */}
-      {hasWarehouse && branches.map((b) => <StockLoader key={b.id} branch={b} onStock={onStock} />)}
     </div>
   )
 }
@@ -239,14 +238,7 @@ function PeoplePanel({ employees }) {
   )
 }
 
-function StockLoader({ branch, onStock }) {
-  const req = useFetch('/warehouse-stock/summary/', { branch: branch.id })
-  useEffect(() => { if (req.data) onStock(branch.id, req.data) }, [req.data, branch.id, onStock])
-  return null
-}
-
-function StockPanel({ branches, stock }) {
-  const loaded = branches.length > 0 && branches.every((b) => stock[b.id])
+function StockPanel({ branches, stock, loaded }) {
   const rows = branches.map((b) => ({ ...b, d: stock[b.id] })).filter((b) => b.d?.since)
   const shortName = (n) => (String(n).includes('—') ? n.split('—').slice(1).join('—').replace('улица,', '').trim() : n)
   const todayRow = (d) => d.days.find((x) => x.date === today()) || { added_kg: 0, consumed_kg: 0 }

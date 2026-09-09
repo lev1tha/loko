@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import api, { errorMessage } from '../api/client'
+import { usePoll } from '../lib/hooks'
 import './ClientApp.css'
 
 const MAX = 5
@@ -64,11 +65,8 @@ export default function ClientApp() {
   }, [])
 
   useEffect(() => { if (entered && phone) loadTrack(phone) }, [entered, phone, loadTrack])
-  useEffect(() => {
-    if (!entered || !phone) return
-    const t = setInterval(() => loadTrack(phone), 7000)
-    return () => clearInterval(t)
-  }, [entered, phone, loadTrack])
+  // Обновление статусов только пока страница на экране (телефон в кармане — тишина).
+  usePoll(() => { if (entered && phone) loadTrack(phone) }, 7000)
 
   function showToast(t) {
     setToast(t)

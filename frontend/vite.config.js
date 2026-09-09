@@ -14,7 +14,20 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: 'dist',
       sourcemap: false,
-      chunkSizeWarningLimit: 1200,
+      chunkSizeWarningLimit: 600,
+      rollupOptions: {
+        output: {
+          // Библиотеки — отдельными чанками: они меняются редко и кешируются на год
+          // (nginx: /assets/ immutable), а код страниц обновляется без их перекачки.
+          manualChunks(id) {
+            if (!id.includes('node_modules')) return undefined
+            if (id.includes('react-router')) return 'router'
+            if (id.includes('/react/') || id.includes('/react-dom/') || id.includes('/scheduler/')) return 'react'
+            if (id.includes('/axios/')) return 'axios'
+            return 'vendor'
+          },
+        },
+      },
     },
     server: {
       port: 5173,
