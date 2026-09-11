@@ -3,7 +3,7 @@ import api, { errorMessage } from '../api/client'
 import { useFetch, usePoll, asList } from '../lib/hooks'
 import { prompt } from '../lib/dialogs'
 import { useAuth } from '../auth/AuthContext'
-import { som, kg } from '../lib/format'
+import { som, kg, dateTimeRu } from '../lib/format'
 import { Alert, Field, Modal, Spinner } from '../components/ui'
 
 const POLL_MS = 15000
@@ -347,6 +347,7 @@ function OrderCard({ order, showBranch, ...itemProps }) {
     <div className="card wh-order">
       <div className="wh-order-head">
         <span className="wh-order-id">#{order.id}</span>
+        <span className="muted" title="Когда создана заявка">{dateTimeRu(order.created_at)}</span>
         {showBranch && order.branch_name && (
           <span className="wh-item-branch">{shortBranch(order.branch_name)}</span>
         )}

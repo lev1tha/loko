@@ -3,7 +3,7 @@ import api, { errorMessage } from '../api/client'
 import { som } from '../lib/format'
 import { Alert, Segmented } from '../components/ui'
 import { LoadingTruck } from '../components/states'
-import { OperatorItemRow, ReceiveModal } from '../components/OperatorItems'
+import { OperatorItemsByDay, ReceiveModal } from '../components/OperatorItems'
 
 // Позиции найдены и оприходованы складом (в чеке клиента, с суммой).
 const FOUND = new Set(['FOUND', 'DELIVERED'])
@@ -81,11 +81,7 @@ export default function OperatorMySales() {
       {!rows.length ? (
         <p className="muted" style={{ margin: 0 }}>В этом месяце заявок пока нет.</p>
       ) : (
-        <div className="operator-sales">
-          {rows.map((it) => (
-            <OperatorItemRow key={it.id} item={it} busyId={busyId} onReceive={setReceiveItem} onDismiss={dismiss} />
-          ))}
-        </div>
+        <OperatorItemsByDay items={rows} busyId={busyId} onReceive={setReceiveItem} onDismiss={dismiss} />
       )}
       {receiveItem && (
         <ReceiveModal item={receiveItem} onClose={() => setReceiveItem(null)} onDone={() => { setReceiveItem(null); load() }} />

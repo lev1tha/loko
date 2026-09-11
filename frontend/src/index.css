@@ -640,7 +640,14 @@ textarea.input { height: auto; padding: 10px 14px; resize: vertical; min-height:
   margin-bottom: 10px;
 }
 .operator-sales-sub { margin: 4px 0 0; font-size: 13px; }
-.operator-sales { display: flex; flex-direction: column; }
+.operator-sales { display: flex; flex-direction: column; gap: 14px; }
+.operator-day { display: flex; flex-direction: column; }
+.operator-day-head {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  padding: 6px 2px; border-bottom: 1px solid var(--hairline);
+}
+.operator-day-title { font-size: 13px; font-weight: 600; color: var(--ink); text-transform: uppercase; letter-spacing: 0.04em; }
+.operator-day-meta { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .operator-sales-row {
   display: flex;
   align-items: baseline;

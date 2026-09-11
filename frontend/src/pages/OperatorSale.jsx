@@ -5,7 +5,7 @@ import { today, dateRu, kg } from '../lib/format'
 import { Alert, Field } from '../components/ui'
 import { IconPlus } from '../components/icons'
 import { useAuth } from '../auth/AuthContext'
-import { OperatorItemRow, ReceiveModal } from '../components/OperatorItems'
+import { OperatorItemsByDay, ReceiveModal } from '../components/OperatorItems'
 
 const MAX_CODES = 5
 
@@ -183,11 +183,7 @@ export default function OperatorSale() {
         ) : !items.length ? (
           <p className="muted" style={{ margin: 0 }}>Пока пусто — впишите коды выше.</p>
         ) : (
-          <div className="operator-sales">
-            {items.map((it) => (
-              <OperatorItemRow key={it.id} item={it} busyId={busyId} onReceive={setReceiveItem} onDismiss={dismiss} />
-            ))}
-          </div>
+          <OperatorItemsByDay items={items} busyId={busyId} onReceive={setReceiveItem} onDismiss={dismiss} />
         )}
       </div>
       {receiveItem && (

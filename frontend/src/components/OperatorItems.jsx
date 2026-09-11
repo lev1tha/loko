@@ -16,6 +16,58 @@ function itemMeta(s) {
   return 'в поиске'
 }
 
+// Заголовок дня: «Сегодня · 11.09», «Вчера · 10.09», дальше «09.09.2026, среда».
+const DAYS = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота']
+function localDay(iso) {
+  const d = new Date(iso)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+function dayLabel(key) {
+  const [y, m, d] = key.split('-').map(Number)
+  const date = new Date(y, m - 1, d)
+  const t = new Date(); const today = localDay(t)
+  const yd = new Date(t); yd.setDate(t.getDate() - 1)
+  const short = `${String(d).padStart(2, '0')}.${String(m).padStart(2, '0')}`
+  if (key === today) return `Сегодня · ${short}`
+  if (key === localDay(yd)) return `Вчера · ${short}`
+  return `${short}.${y}, ${DAYS[date.getDay()]}`
+}
+
+// Список позиций по дням: свежие сверху, в каждом дне — счётчик и сумма оприходованного.
+export function OperatorItemsByDay({ items, busyId, onReceive, onDismiss }) {
+  const groups = new Map()
+  for (const it of items) {
+    const key = localDay(it.created_at)
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key).push(it)
+  }
+  const keys = [...groups.keys()].sort().reverse()
+  return (
+    <div className="operator-sales">
+      {keys.map((key) => {
+        const rows = groups.get(key)
+        const total = rows.filter((r) => FOUND.has(r.status)).reduce((s, r) => s + (parseFloat(r.price_som) || 0), 0)
+        const pending = rows.filter((r) => r.status === 'LOCATED').length
+        return (
+          <div className="operator-day" key={key}>
+            <div className="operator-day-head">
+              <span className="operator-day-title">{dayLabel(key)}</span>
+              <span className="operator-day-meta">
+                {rows.length} {rows.length === 1 ? 'код' : rows.length < 5 ? 'кода' : 'кодов'}
+                {pending > 0 && ` · оприходовать: ${pending}`}
+                {total > 0 && ` · ${som(total)}`}
+              </span>
+            </div>
+            {rows.map((it) => (
+              <OperatorItemRow key={it.id} item={it} busyId={busyId} onReceive={onReceive} onDismiss={onDismiss} />
+            ))}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // Строка позиции сотрудника: статус, сумма, действия «Оприходовать» (найденное) и «✕» (не найдено).
 export function OperatorItemRow({ item, busyId, onReceive, onDismiss }) {
   const found = FOUND.has(item.status)
