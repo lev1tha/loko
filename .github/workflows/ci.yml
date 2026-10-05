@@ -1,0 +1,151 @@
+name: CI/CD
+
+# The Cloudflare Pages frontend deploy lives in deploy-frontend.yml (separate
+# workflow, untouched). This workflow is CI for backend + frontend + Docker
+# images, plus the VPS redeploy from infra/README.md («Обновление (redeploy)»).
+
+on:
+  push:
+    paths-ignore: ['**/*.md', 'docs/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  backend:
+    name: Backend (Django)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      # Same major as infra/docker-compose.yml (postgres:17).
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: loko
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d loko"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # Dummy values for CI only (see infra/.env.example).
+      DEBUG: 'False'
+      SECRET_KEY: ci-only-dummy-secret-key-not-used-anywhere-else
+      ALLOWED_HOSTS: localhost,127.0.0.1
+      POSTGRES_DB: loko
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: '5432'
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13' # infra/Dockerfile.backend: python:3.13-slim
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Django system check
+        run: python manage.py check
+
+      - name: Check for missing migrations
+        run: python manage.py makemigrations --check --dry-run
+
+      - name: OpenAPI schema must stay warning-free
+        run: python manage.py spectacular --validate --fail-on-warn > /dev/null
+
+      - name: Tests
+        run: python manage.py test --noinput
+
+  frontend:
+    name: Frontend (React + Vite)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22 # infra/Dockerfile.frontend: node:22-slim
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint (oxlint)
+        run: npm run lint
+
+      - name: Unit tests (vitest)
+        run: npm test
+
+      - name: Build
+        # VITE_API_BASE_URL comes from frontend/.env.production.
+        run: npm run build
+
+  docker:
+    name: Docker image build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build backend image (no push)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: infra/Dockerfile.backend
+          push: false
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,mode=max,scope=backend
+
+      - name: Build frontend image (no push)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: infra/Dockerfile.frontend
+          push: false
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
+
+  deploy:
+    name: Deploy (VPS, docker compose)
+    needs: [backend, frontend, docker]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Redeploy over SSH (infra/README.md, «Обновление (redeploy)»)
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script: |
+            set -e
+            cd "${{ vars.DEPLOY_PATH }}"
+            git pull
+            cd infra
+            # Rebuild + migrations (run by infra/entrypoint.sh).
+            docker compose up -d --build backend
+            # Rebuild the SPA only after the backend came up.
+            docker compose --profile build run --rm --build frontend
